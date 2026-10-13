@@ -1,0 +1,55 @@
+name: Build unsigned IPA
+
+# Put this file at .github/workflows/build-unsigned-ipa.yml in your fork of
+# Th0rgal/open_health, then run it from the Actions tab (workflow_dispatch).
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + iOS targets
+        run: |
+          rustup default stable
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Install xcodegen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Build Rust xcframework
+        run: bash apps/ios/build-xcframework.sh
+
+      - name: Generate Xcode project (model-free)
+        working-directory: apps/ios/OuraApp
+        run: xcodegen generate --spec project-ci.yml
+
+      - name: Build app without code signing
+        working-directory: apps/ios/OuraApp
+        run: |
+          xcodebuild \
+            -project OuraApp.xcodeproj \
+            -scheme OuraApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package unsigned IPA
+        working-directory: apps/ios/OuraApp
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/OuraApp.app Payload/
+          zip -qry OuraApp-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OuraApp-unsigned-ipa
+          path: apps/ios/OuraApp/OuraApp-unsigned.ipa
