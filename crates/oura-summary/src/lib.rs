@@ -17,6 +17,7 @@ pub mod research_export;
 pub mod ring_time;
 pub mod sleep_score;
 pub mod symptoms;
+pub mod workouts;
 
 /// An unanchored ring-clock epoch at least this long is worth a warning.
 const UNANCHORED_WARN_H: f64 = 12.0;

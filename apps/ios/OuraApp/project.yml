@@ -81,6 +81,8 @@ targets:
       - path: RawData.swift
       - path: ResearchExport.swift
       - path: HeartRate.swift
+      - path: Workouts.swift
+      - path: ActivityViews.swift
       - path: Theme.swift
       - path: BLETransport.swift
       - path: RingSync.swift

@@ -1832,6 +1832,8 @@ struct SleepReport: View {
 struct ActivityReport: View {
     let s: Summary
     let day: String
+    /// The Activity tab lists workouts itself, with detail and editing.
+    var showSessions = true
     var body: some View {
         let st = s.activity_daily[day]
         let prof = s.activity_profile[day] ?? []
@@ -1858,13 +1860,15 @@ struct ActivityReport: View {
             Readout(value: String(format: "%.1f MET", peak), caption: "peak intensity")
         }
 
-        let ws = s.workoutsOn(day)
-        Rule("sessions")
-        if ws.isEmpty {
-            Text("No sessions detected this day.").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
-        } else {
-            VStack(spacing: 14) {
-                ForEach(ws) { w in SessionRow(label: w.label, durationMin: w.durationMin, startHM: w.startHM) }
+        if showSessions {
+            let ws = s.workoutsOn(day)
+            Rule("sessions")
+            if ws.isEmpty {
+                Text("No workouts this day.").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+            } else {
+                VStack(spacing: 14) {
+                    ForEach(ws) { w in SessionRow(label: w.label, durationMin: w.durationMin, startHM: w.startHM) }
+                }
             }
         }
     }

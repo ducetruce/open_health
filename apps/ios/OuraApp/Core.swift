@@ -24,12 +24,14 @@ enum SummaryCache {
         var summary: Summary
         var workouts: [WorkoutSession]
         var illness: IllnessResult?
+        var detected: [DetectedWorkout]? = nil
     }
     static func load() -> Summary? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         if let cached = try? JSONDecoder().decode(CachedSummary.self, from: data), cached.summary.error == nil {
             var result = cached.summary
             result.workouts = cached.workouts; result.illness = cached.illness
+            result.detectedWorkouts = cached.detected ?? []
             return result
         }
         guard let legacy = try? JSONDecoder().decode(Summary.self, from: data), legacy.error == nil else { return nil }
@@ -39,7 +41,8 @@ enum SummaryCache {
     static func save(_ summary: Summary) {
         guard summary.error == nil else { return }
         queue.async {
-            guard let data = try? JSONEncoder().encode(CachedSummary(summary: summary, workouts: summary.workouts, illness: summary.illness)) else { return }
+            guard let data = try? JSONEncoder().encode(CachedSummary(summary: summary, workouts: summary.workouts, illness: summary.illness,
+                                                                          detected: summary.detectedWorkouts)) else { return }
             try? data.write(to: url, options: .atomic)
         }
     }
@@ -63,7 +66,13 @@ enum Core {
         let tzOffset = Int64((Double(secs) / 3600).rounded())
         let json = summaryJson(dbPath: path, tzOffset: tzOffset)
         guard let data = json.data(using: .utf8) else { return Summary(error: "decode failed") }
-        do { return try JSONDecoder().decode(Summary.self, from: data) }
+        do {
+            var summary = try JSONDecoder().decode(Summary.self, from: data)
+            if summary.error == nil {
+                summary.detectedWorkouts = WorkoutData.detected(dbPath: path, tzOffset: tzOffset)
+            }
+            return summary
+        }
         catch {
             dlog("core", "summary decode failed: \(error) json=\(json.prefix(300))")
             return Summary(error: "decode failed")

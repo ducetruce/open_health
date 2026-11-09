@@ -159,7 +159,7 @@ final class HealthExport: ObservableObject {
         }
 
         let samples = buildSamples(summary)
-        let workouts = plannedWorkouts(summary.workouts)
+        let workouts = plannedWorkouts(summary.exportableWorkouts)
         dlog("health", "export \(samples.count) samples, \(workouts.count) workouts")
         let types = Self.reconciliationTypes(canShare: canShare)
         let collect = DispatchGroup()
@@ -253,7 +253,7 @@ final class HealthExport: ObservableObject {
         // Force one reconciliation after upgrading from the mislabeled SDNN
         // writer, and another when the OS first supports the proper RMSSD type.
         var parts = ["hrv-rmssd-v1:\(ringHRVType?.identifier ?? "unavailable")"]
-        parts.append(contentsOf: s.workouts.filter { $0.isWorkout >= 0.5 }.map(\.id).sorted())
+        parts.append(contentsOf: s.exportableWorkouts.map(\.id).sorted())
         for n in s.nights {
             let st = n.hypnogram ?? []
             parts.append("n\(n.start_ds ?? 0):\(st.count):\(st.reduce(0, +)):\(n.hrv_ms ?? 0):\(n.rhr ?? 0)")

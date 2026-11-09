@@ -160,10 +160,16 @@ enum JSONValue: Codable {
 
 struct DailyStat: Codable { var active_kcal: Double?; var total_kcal: Double?; var steps: Double?; var distance_m: Double? }
 struct Profile: Codable { var sex: String?; var age: Double?; var height_m: Double?; var weight_kg: Double?; var ring_size: Double? }
-// a detected activity session (on-device automatic_activity_detection)
+// an activity session: detected on-device by automatic_activity_detection (`source`
+// nil or "model"), started/logged by the wearer ("user"), or found by the model-free
+// movement rule ("auto"). `uid` is the stable id of user/auto sessions.
 struct WorkoutSession: Identifiable, Codable {
     let start: String; let end: String; let durationMin: Int; let label: String; let isWorkout: Double
-    var id: String { start + label }
+    var uid: String? = nil
+    var source: String? = nil
+    var id: String { uid ?? (start + label) }
+    var isUser: Bool { source == "user" }
+    var isAuto: Bool { source == "auto" }
     var dayLabel: String { String(start.prefix(10)) }      // YYYY-MM-DD
     var startHM: String { String(start.suffix(5)) }        // HH:MM
 }
@@ -310,6 +316,11 @@ struct Summary: Codable {
     /// judged against your own baseline. Used when the torch model is not present.
     var symptoms: IllnessResult?
     var workouts: [WorkoutSession] = []   // on-device only (not in the JSON)
+    /// Rule-based detections from the shared core (model-free builds).
+    var detectedWorkouts: [DetectedWorkout] = []
+    /// Workouts the wearer started or logged, plus the rule detections still shown —
+    /// merged in from `WorkoutStore` by `withUserWorkouts(_:)`.
+    var userWorkouts: [WorkoutSession] = []
     var modelErrors: [String] = []        // on-device model failures (not in the JSON)
     var error: String?
     // `workouts`/`modelErrors` are filled on-device (not in the FFI JSON), so keep them
@@ -391,8 +402,17 @@ extension Summary {
         if let best = cands.max(by: { ($0.in_bed_h ?? 0) < ($1.in_bed_h ?? 0) }) { return best }
         return nights.first { $0.ymd == nil && ($0.date ?? "").hasSuffix(String(day.suffix(5))) }
     }
+    /// Model, user and rule workouts together, newest first.
+    var allWorkouts: [WorkoutSession] {
+        (workouts.filter { $0.isWorkout >= 0.5 } + userWorkouts).sorted { $0.start > $1.start }
+    }
+    /// What goes to Apple Health: model detections and the wearer's own workouts,
+    /// never unconfirmed rule detections.
+    var exportableWorkouts: [WorkoutSession] {
+        workouts.filter { $0.isWorkout >= 0.5 } + userWorkouts.filter(\.isUser)
+    }
     func workoutsOn(_ day: String) -> [WorkoutSession] {
-        workouts.filter { $0.isWorkout >= 0.5 && $0.dayLabel == day }
+        allWorkouts.filter { $0.dayLabel == day }
     }
 
     /// One value per wake-date (longest night wins), oldest first — feeds vital trend charts.

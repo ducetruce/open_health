@@ -61,6 +61,33 @@ pub fn hourly_hr_json(db_path: String, tz_offset: i64, days: u32) -> String {
     }
 }
 
+/// What the ring recorded during a user-started or user-logged workout: MET-derived
+/// active calories, estimated steps and distance, and quality-gated heart rate
+/// (`hr` is null when the ring has no heart rate for the window).
+/// `start_unix`/`end_unix` are UTC seconds.
+///
+/// Returns the JSON string, or `{ "error": "…" }`.
+#[uniffi::export]
+pub fn workout_stats_json(db_path: String, start_unix: i64, end_unix: i64) -> String {
+    match oura_summary::workouts::window_stats(std::path::Path::new(&db_path), start_unix, end_unix)
+    {
+        Ok(v) => v.to_string(),
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
+/// Rule-based workout detection for builds without Oura's activity model: runs of
+/// sustained moderate-or-harder movement in the last `days` days, newest first.
+///
+/// Returns `{ "sessions": [...] }`, or `{ "error": "…" }`.
+#[uniffi::export]
+pub fn detected_workouts_json(db_path: String, tz_offset: i64, days: u32) -> String {
+    match oura_summary::workouts::detect_workouts(std::path::Path::new(&db_path), tz_offset, days) {
+        Ok(v) => v.to_string(),
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
 /// Write a clean single-file copy of the database to `dest_path` — the export half of
 /// backup/restore.
 ///

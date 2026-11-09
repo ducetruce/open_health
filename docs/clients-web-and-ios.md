@@ -183,6 +183,14 @@ client re-derives packet timing at all — tracked as a follow-up.
 
 ## Known gaps (iOS-only, not yet on the web)
 
+- **Workout tracking** (iOS): start/stop a workout with a live timer, log a past one, edit
+  or delete it, and rule-based detection of sustained movement (≥3 MET for ≥10 min,
+  pauses ≤3 min) for builds without the AAD model. Numbers for any workout window come
+  from `oura-summary::workouts` (`window_stats`, `detect_workouts`; FFI
+  `workout_stats_json` / `detected_workouts_json`). Workouts are stored on the phone
+  (`WorkoutStore`, Workouts.swift) and exported to Apple Health; the web has no
+  equivalent yet.
+
 Now on both: the model-free Symptom Radar (`symptoms`, used when the Python runner
 has no `illness`) and the ring-clock warnings (`clock.warnings`). Still iOS-only:
 
