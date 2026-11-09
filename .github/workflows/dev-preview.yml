@@ -1,0 +1,92 @@
+name: Dev preview (tests + simulator screenshots)
+
+# Builds the model-free app for the simulator, runs it on synthetic demo data
+# (.github/scripts/demo_summary.py) and pushes screenshots of every tab to the
+# `preview` branch, together with the regenerated UniFFI bindings.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  preview:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: preview-rust-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          restore-keys: preview-rust-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}-
+
+      - name: Install build tools
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Rust tests (summary + core)
+        run: cargo test --locked -p oura-summary -p oura-core 2>&1 | tail -60
+
+      - name: Build Rust iOS framework (regenerates Swift bindings)
+        run: bash apps/ios/build-xcframework.sh
+
+      - name: Generate project
+        working-directory: apps/ios/OuraApp
+        run: xcodegen generate --spec project-ci.yml
+
+      - name: Build for simulator
+        working-directory: apps/ios/OuraApp
+        run: |
+          set -o pipefail
+          xcodebuild build -project OuraApp.xcodeproj -scheme OuraApp -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log | grep -E "error:|warning: .*(Workouts|ActivityViews|OuraApp)\.swift|BUILD" | head -120
+
+      - name: Screenshots
+        working-directory: apps/ios/OuraApp
+        run: |
+          set -x
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if "iPhone 16 Pro" == v["name"] or "iPhone 16" in v["name"]))')
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryLevel 100 --cellularBars 4 || true
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/OuraApp.app
+          BUNDLE=md.thomas.openoura
+          mkdir -p shots
+          shot() {
+            name=$1; shift
+            xcrun simctl terminate "$UDID" $BUNDLE || true
+            DATA=$(xcrun simctl get_app_container "$UDID" $BUNDLE data)
+            mkdir -p "$DATA/Library/Application Support"
+            python3 "$GITHUB_WORKSPACE/.github/scripts/demo_summary.py" "$DATA/Library/Application Support" $DEMO_FLAGS
+            xcrun simctl launch "$UDID" $BUNDLE "$@"
+            sleep 7
+            xcrun simctl io "$UDID" screenshot "shots/$name.png"
+          }
+          DEMO_FLAGS="" shot 1-today -tab today
+          DEMO_FLAGS="" shot 2-sleep -tab sleep
+          DEMO_FLAGS="" shot 3-activity -tab activity
+          DEMO_FLAGS="" shot 4-vitals -tab vitals
+          DEMO_FLAGS="--active" shot 5-activity-live -tab activity
+          DEMO_FLAGS="" shot 6-log-workout -tab activity -logWorkout
+          DEMO_FLAGS="" shot 7-ring -openSync
+
+      - name: Publish to preview branch
+        if: always()
+        run: |
+          mkdir -p /tmp/preview
+          cp -R apps/ios/OuraApp/shots /tmp/preview/ 2>/dev/null || true
+          cp apps/ios/OuraApp/build.log /tmp/preview/ 2>/dev/null || true
+          mkdir -p /tmp/preview/generated
+          cp -R apps/ios/generated/. /tmp/preview/generated/
+          cd /tmp/preview
+          git init -q -b preview
+          git config user.name "preview-bot"; git config user.email "preview-bot@users.noreply.github.com"
+          git add -A && git commit -qm "preview for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" preview
