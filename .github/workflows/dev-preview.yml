@@ -46,7 +46,7 @@ jobs:
           set -o pipefail
           xcodebuild build -project OuraApp.xcodeproj -scheme OuraApp -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log | grep -E "error:|warning: .*(Workouts|ActivityViews|OuraApp)\.swift|BUILD" | head -120
+            -derivedDataPath build ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log | grep -E "error:|warning: .*(Workouts|ActivityViews|OuraApp)\.swift|BUILD" | head -120
 
       - name: Screenshots
         working-directory: apps/ios/OuraApp
