@@ -352,6 +352,11 @@ RustBuffer uniffi_oura_core_fn_func_core_version(RustCallStatus *_Nonnull out_st
 RustBuffer uniffi_oura_core_fn_func_database_integrity(RustBuffer db_path, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_DETECTED_WORKOUTS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_DETECTED_WORKOUTS_JSON
+RustBuffer uniffi_oura_core_fn_func_detected_workouts_json(RustBuffer db_path, int64_t tz_offset, uint32_t days, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_EVENTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_EVENTS_JSON
 RustBuffer uniffi_oura_core_fn_func_events_json(RustBuffer db_path, RustBuffer name_filter, uint32_t limit, RustCallStatus *_Nonnull out_status
@@ -385,6 +390,11 @@ double uniffi_oura_core_fn_func_rmssd(RustBuffer ibi_ms, RustCallStatus *_Nonnul
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_SUMMARY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_SUMMARY_JSON
 RustBuffer uniffi_oura_core_fn_func_summary_json(RustBuffer db_path, int64_t tz_offset, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_WORKOUT_STATS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_WORKOUT_STATS_JSON
+RustBuffer uniffi_oura_core_fn_func_workout_stats_json(RustBuffer db_path, int64_t start_unix, int64_t end_unix, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_OURA_CORE_RUSTBUFFER_ALLOC
@@ -691,6 +701,12 @@ uint16_t uniffi_oura_core_checksum_func_database_integrity(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_DETECTED_WORKOUTS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_DETECTED_WORKOUTS_JSON
+uint16_t uniffi_oura_core_checksum_func_detected_workouts_json(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_EVENTS_JSON
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_EVENTS_JSON
 uint16_t uniffi_oura_core_checksum_func_events_json(void
@@ -730,6 +746,12 @@ uint16_t uniffi_oura_core_checksum_func_rmssd(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_SUMMARY_JSON
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_SUMMARY_JSON
 uint16_t uniffi_oura_core_checksum_func_summary_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_WORKOUT_STATS_JSON
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_WORKOUT_STATS_JSON
+uint16_t uniffi_oura_core_checksum_func_workout_stats_json(void
     
 );
 #endif
