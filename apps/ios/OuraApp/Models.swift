@@ -211,9 +211,9 @@ struct Device: Codable {
 // block; computed on-device by IllnessModel so it isn't part of the FFI JSON.
 struct IllnessBiomarker: Identifiable, Codable {
     let type: String        // AverageBreath | LowestHeartRate | AverageHrv | TemperatureDeviation
-    let value: Double
-    let lower: Double
-    let upper: Double
+    var value: Double
+    var lower: Double
+    var upper: Double
     let indicatesSymptoms: Bool
     let reason: String?     // "ELEVATED" | "DECREASED" | nil
     var id: String { type }
@@ -441,17 +441,17 @@ enum VitalKind: String, Identifiable, CaseIterable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .hrv: return "nightly hrv"
-        case .heartRate: return "heart rate"
-        case .temp: return "skin temp"
-        case .oxygen: return "blood o₂"
+        case .hrv: return "Nightly HRV"
+        case .heartRate: return "Heart rate"
+        case .temp: return "Skin temperature"
+        case .oxygen: return "Blood O₂"
         }
     }
     var unit: String {
         switch self {
         case .hrv: return "ms"
         case .heartRate: return "bpm"
-        case .temp: return "°c"
+        case .temp: return UnitSettings.shared.temperature.symbol
         case .oxygen: return "%"
         }
     }
@@ -470,7 +470,11 @@ enum VitalKind: String, Identifiable, CaseIterable {
         switch self {
         case .hrv: return s.nightlySeries(\.hrv_ms)
         case .heartRate: return s.nightlySeries(\.rhr)
-        case .temp: return s.nightlySeries(\.skin_temp)
+        case .temp:
+            let unit = UnitSettings.shared.temperature
+            return s.nightlySeries(\.skin_temp).map {
+                DatedVital(date: $0.date, value: Convert.temperature($0.value, unit))
+            }
         case .oxygen: return s.nightlySeries(\.spo2_mean)
         }
     }

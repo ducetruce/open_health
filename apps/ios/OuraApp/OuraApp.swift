@@ -825,6 +825,8 @@ struct RootView: View {
     @StateObject private var ring = RingSync()
     @StateObject private var modelProgress = ModelProgress()
     @ObservedObject private var workouts = WorkoutStore.shared
+    /// Redraws every screen when a display unit changes.
+    @ObservedObject private var units = UnitSettings.shared
     @State private var tab: AppTab = .today
     @State private var sleepDay = ""
     @State private var showStartWorkout = false
@@ -1265,7 +1267,9 @@ struct RootView: View {
     @ViewBuilder private func vitalsTab(_ s: Summary) -> some View {
         let latestTemp = s.nights.first { $0.skin_temp != nil }
         let latestOxygen = s.nights.first { $0.spo2_mean != nil }
+        let tempUnit = units.temperature
         let recentTemperatures = Array(s.nights.compactMap(\.skin_temp).prefix(14).reversed())
+            .map { Convert.temperature($0, tempUnit) }
         let recentOxygen = Array(s.nights.compactMap(\.spo2_mean).prefix(14).reversed())
         let latestHR = s.vitals.hr
         AppHeader(title: "Vitals", subtitle: busyLabel) { headerButtons }
@@ -1291,8 +1295,8 @@ struct RootView: View {
                     Rectangle().fill(Obs.rule).frame(height: 1)
                     HStack(alignment: .top, spacing: 24) {
                         VitalCell(tag: "skin temp",
-                                  value: latestTemp?.skin_temp.map { String(format: "%.1f", $0) } ?? "–",
-                                  unit: "°C",
+                                  value: Fmt.temperature(latestTemp?.skin_temp, tempUnit),
+                                  unit: tempUnit.symbol,
                                   series: recentTemperatures,
                                   detail: latestTemp.map { latestLabel(date: s.wakeYmd($0)) },
                                   action: { vital = .temp })

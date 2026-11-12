@@ -98,6 +98,7 @@ struct ProfileSettingsView: View {
     @State private var importing = false
     @State private var message: String?
     @ObservedObject private var health = HealthExport.shared
+    @ObservedObject private var units = UnitSettings.shared
     let onSaved: () -> Void
 
     init(profile: Profile?, onSaved: @escaping () -> Void) {
@@ -116,16 +117,33 @@ struct ProfileSettingsView: View {
                     }
                     TextField("Age", value: $profile.age, format: .number.precision(.fractionLength(0...1)))
                         .keyboardType(.decimalPad)
-                    TextField("Height (cm)", value: $profile.heightCm, format: .number.precision(.fractionLength(0...1)))
-                        .keyboardType(.decimalPad)
-                    TextField("Weight (kg)", value: $profile.weightKg, format: .number.precision(.fractionLength(0...1)))
-                        .keyboardType(.decimalPad)
+                    HeightField(cm: $profile.heightCm, unit: units.height)
+                    WeightField(kg: $profile.weightKg, unit: units.weight)
                     TextField("Ring size", value: $profile.ringSize, format: .number.precision(.fractionLength(0...1)))
                         .keyboardType(.decimalPad)
                 } header: {
                     Text("Your data")
                 } footer: {
                     Text("Stored only on this iPhone and used by the cardiovascular and activity calculations.")
+                }
+
+                Section {
+                    Picker("Height", selection: $units.height) {
+                        ForEach(HeightUnit.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Weight", selection: $units.weight) {
+                        ForEach(WeightUnit.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Temperature", selection: $units.temperature) {
+                        ForEach(TemperatureUnit.allCases) { Text($0.symbol).tag($0) }
+                    }
+                    Picker("Distance", selection: $units.distance) {
+                        ForEach(DistanceUnit.allCases) { Text($0.symbol).tag($0) }
+                    }
+                } header: {
+                    Text("Units")
+                } footer: {
+                    Text("Changes how values are shown. Your data is unaffected.")
                 }
 
                 Section {

@@ -84,6 +84,7 @@ targets:
       - path: Workouts.swift
       - path: ActivityViews.swift
       - path: Theme.swift
+      - path: Units.swift
       - path: BLETransport.swift
       - path: RingSync.swift
       - path: ProfileSettings.swift

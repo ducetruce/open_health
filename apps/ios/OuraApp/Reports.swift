@@ -762,7 +762,10 @@ struct Polysomnograph: View {
         sig("Heart rate", "bpm", s?.hr, Obs.chart, rawTimed: st?.hr)
         sig("HRV", "ms", s?.hrv, Obs.chart, rawTimed: st?.hrv)
         sig("Blood O₂", "%", s?.spo2, Obs.chart, rawTimed: st?.spo2)
-        sig("Skin temp", "°C", s?.temp, Obs.chart, 1, span: s?.temp_span, rawTimed: st?.temp)
+        let tempUnit = UnitSettings.shared.temperature
+        sig("Skin temp", tempUnit.symbol, s?.temp.map { $0.map { Convert.temperature($0, tempUnit) } },
+            Obs.chart, 1, span: s?.temp_span,
+            rawTimed: st?.temp.map { $0.map { p in p.count > 1 ? [p[0], Convert.temperature(p[1], tempUnit)] + p.dropFirst(2) : p } })
         // Prefer timestamped motion (`series_t.motion`), falling back to `series.motion_time`.
         // Legacy exports lost motion timestamps; do not invent their positions.
         if let timedMotion = Sleep.timedSamples(st?.motion, startUnix: night.start_unix, endUnix: night.end_unix),
@@ -1227,7 +1230,7 @@ struct IllnessCard: View {
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(Self.order, id: \.self) { type in
                         if let biomarker = illness.biomarkers.first(where: { $0.type == type }) {
-                            BiomarkerRow(name: Self.names[type] ?? type,
+                            BiomarkerRow(type: type, name: Self.names[type] ?? type,
                                          unit: Self.units[type] ?? "", biomarker: biomarker)
                         }
                     }
@@ -1248,9 +1251,30 @@ struct IllnessCard: View {
 }
 
 private struct BiomarkerRow: View {
+    let type: String
     let name: String
-    let unit: String
-    let biomarker: IllnessBiomarker
+    let rawUnit: String
+    let rawBiomarker: IllnessBiomarker
+
+    init(type: String, name: String, unit: String, biomarker: IllnessBiomarker) {
+        self.type = type
+        self.name = name
+        self.rawUnit = unit
+        self.rawBiomarker = biomarker
+    }
+
+    /// A temperature deviation is shown in the chosen temperature unit.
+    private var isTemperature: Bool { type == "TemperatureDeviation" }
+    private var unit: String { isTemperature ? UnitSettings.shared.temperature.symbol : rawUnit }
+    private var biomarker: IllnessBiomarker {
+        guard isTemperature else { return rawBiomarker }
+        let t = UnitSettings.shared.temperature
+        var b = rawBiomarker
+        b.value = Convert.temperatureDelta(b.value, t)
+        b.lower = Convert.temperatureDelta(b.lower, t)
+        b.upper = Convert.temperatureDelta(b.upper, t)
+        return b
+    }
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var change: String {
@@ -1262,7 +1286,7 @@ private struct BiomarkerRow: View {
     }
     private func formatted(_ value: Double) -> String {
         guard value.isFinite else { return "–" }
-        return unit == "°C"
+        return isTemperature
             ? value.formatted(.number.precision(.fractionLength(1)))
             : value.formatted(.number.precision(.fractionLength(0...1)))
     }
@@ -1842,7 +1866,10 @@ struct ActivityReport: View {
             Readout(value: steps.value, caption: steps.unit)
             Readout(value: st.map { Fmt.count($0.active_kcal ?? 0) } ?? "–", caption: "active kcal")
             Readout(value: st.map { Fmt.count($0.total_kcal ?? 0) } ?? "–", caption: "total kcal")
-            if let d = st?.distance_m { Readout(value: String(format: "%.1f", d / 1000), caption: "distance · km") }
+            if let d = st?.distance_m {
+                let unit = UnitSettings.shared.distance
+                Readout(value: Fmt.distance(meters: d, unit), caption: "distance · \(unit.symbol)")
+            }
         }
 
         Rule("movement across the day")
