@@ -152,7 +152,7 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
                     }
                     connectTimeout = work
                     bleQueue.asyncAfter(deadline: .now() + timeout, execute: work)
-                    if central.state == .poweredOn { startScan() }
+                    if central.state == .poweredOn { startConnecting() }
                     else if [.poweredOff, .unauthorized, .unsupported].contains(central.state) {
                         finishConnect(.failure(BLEError.poweredOff))
                     }
@@ -171,6 +171,57 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
         case .unknown: return "unknown (still initializing)"
         @unknown default: return "state \(state.rawValue)"
         }
+    }
+
+    /// How long a direct connection to an already-known ring may take before falling
+    /// back to scanning for advertisements.
+    private static let directConnectBudget: TimeInterval = 12
+    private var directConnectFallback: DispatchWorkItem?
+
+    /// Connect without the user having to tap the ring in iOS Settings.
+    ///
+    /// A ring that is bonded to this iPhone often stops sending the advertisements a
+    /// scan looks for, which is why it used to need a tap under Settings → Bluetooth.
+    /// CoreBluetooth can still reach it: a ring iOS already holds a connection to is
+    /// returned by `retrieveConnectedPeripherals`, and one this app connected to before
+    /// can be connected to directly by its identifier, without being seen in a scan.
+    /// Only if neither works within a few seconds does this fall back to scanning.
+    private func startConnecting() {
+        let connected = central.retrieveConnectedPeripherals(withServices: [RingUUID.service])
+            .filter { !excludedPeripheralIDs.contains($0.identifier) }
+        let known = preferredPeripheralID.flatMap { id in
+            excludedPeripheralIDs.contains(id) ? nil : central.retrievePeripherals(withIdentifiers: [id]).first
+        }
+        let target = connected.first { $0.identifier == preferredPeripheralID }
+            ?? known
+            ?? connected.first
+        guard let target else { return startScan() }
+
+        let alreadyLinked = connected.contains { $0.identifier == target.identifier }
+        dlog("ble", "connecting directly to known ring id=\(target.identifier.uuidString.suffix(12)) "
+             + (alreadyLinked ? "(already connected to iOS)" : "(remembered from an earlier sync)"))
+        lock.lock()
+        stage = alreadyLinked ? "opening the ring iOS is already connected to"
+                              : "reconnecting to the remembered ring"
+        _connectedPeripheralID = target.identifier
+        lock.unlock()
+        peripheral = target
+        target.delegate = self
+        central.connect(target, options: nil)
+
+        let fallback = DispatchWorkItem { [weak self] in
+            guard let self, !self.closed, self.connectCont != nil,
+                  let pending = self.peripheral, pending === target, self.writeChar == nil,
+                  pending.state != .connected
+            else { return }
+            dlog("ble", "direct connect did not complete in \(Int(Self.directConnectBudget))s; scanning instead")
+            self.central.cancelPeripheralConnection(pending)
+            self.peripheral = nil
+            self.lock.lock(); self._connectedPeripheralID = nil; self.lock.unlock()
+            self.startScan()
+        }
+        directConnectFallback = fallback
+        bleQueue.asyncAfter(deadline: .now() + Self.directConnectBudget, execute: fallback)
     }
 
     private func startScan() {
@@ -236,7 +287,7 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
         switch central.state {
         case .poweredOn:
             poweredOn = true
-            if connectCont != nil { startScan() }
+            if connectCont != nil { startConnecting() }
         case .poweredOff, .unauthorized, .unsupported:
             finishConnect(.failure(BLEError.poweredOff))
             closeOnQueue()
@@ -328,6 +379,7 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard !closed, self.peripheral === peripheral else { return }
+        directConnectFallback?.cancel(); directConnectFallback = nil
         let mtu = peripheral.maximumWriteValueLength(for: .withResponse)
         dlog("ble", "GATT connected (maxWrite=\(mtu)B); discovering the Oura service")
         lock.lock(); stage = "discovering services/characteristics"; lock.unlock()
@@ -338,6 +390,13 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
                         error: Error?) {
         guard !closed, self.peripheral === peripheral else { return }
         dlog("ble", "GATT connect FAILED: \(error.map { String(describing: $0) } ?? "no error info")")
+        if let fallback = directConnectFallback, connectCont != nil {
+            // The remembered ring could not be opened directly; look for it instead.
+            fallback.cancel(); directConnectFallback = nil
+            self.peripheral = nil
+            lock.lock(); _connectedPeripheralID = nil; lock.unlock()
+            return startScan()
+        }
         finishConnect(.failure(error ?? BLEError.notFound))
     }
 
@@ -507,6 +566,7 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
         let timer = connectTimeout; connectTimeout = nil
         lock.unlock()
         timer?.cancel() // stop a still-pending timeout from firing on a finished attempt
+        directConnectFallback?.cancel(); directConnectFallback = nil
         if case .failure = result {
             // tear down an abandoned/failed attempt: cancel the peripheral so iOS stops
             // delivering its callbacks, and reset the per-attempt state so a stray late

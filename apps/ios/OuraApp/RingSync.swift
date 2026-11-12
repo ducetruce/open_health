@@ -417,10 +417,10 @@ final class RingSync: ObservableObject {
             ModelCacheStore.clearAll()
             #endif
             connectionIssue = nil
-            status = "local sync data reset"
+            status = "Local sync data reset"
             dlog("db", status)
             return true
-        } catch { status = "reset failed: \(error)"; dlog("db", status); return false }
+        } catch { status = "Reset failed: \(error)"; dlog("db", status); return false }
     }
 
     func checkDatabase() async {
@@ -494,7 +494,7 @@ final class RingSync: ObservableObject {
     /// wipe someone else's ring sitting on the same charger.
     func factoryReset(keyHex: String, confirmSerial: String) async -> Bool {
         guard !busy else { return false }
-        guard WorkCoordinator.shared.available else { status = "paused — open the app to reset"; return false }
+        guard WorkCoordinator.shared.available else { status = "Paused — open the app to reset"; return false }
         connectionIssue = nil
         busy = true
         paused = false
@@ -513,14 +513,14 @@ final class RingSync: ObservableObject {
         }
 
         dlog("reset", "start — target \(confirmSerial)")
-        status = "looking for \(confirmSerial)…"
+        status = "Looking for \(confirmSerial)…"
         let t = BLETransport(nameContains: "Oura", preferredPeripheralID: preferredPeripheralID)
         transport = t
         do {
             try await t.connect()
         } catch {
             dlog("reset", "BLE connect FAILED: \(error)")
-            status = "couldn't connect (\(error)) — put the ring on its charger next to this iPhone"
+            status = "Couldn't connect (\(error)) — put the ring on its charger next to this iPhone"
             return false
         }
 
@@ -532,7 +532,7 @@ final class RingSync: ObservableObject {
             s.cancel(reason: "transport closed")
         }
 
-        status = "erasing…"
+        status = "Erasing…"
         do {
             let serial = try await s.factoryReset(keyHex: keyHex, confirmSerial: confirmSerial)
             Keychain.clearKey()
@@ -543,7 +543,7 @@ final class RingSync: ObservableObject {
             return true
         } catch {
             dlog("reset", "FAILED: \(error)")
-            status = "reset failed: \(error)"
+            status = "Reset failed: \(error)"
             return false
         }
     }
@@ -557,7 +557,7 @@ final class RingSync: ObservableObject {
     /// A ring that still holds a key rejects this; reset it first.
     func pair(existingKeyHex: String? = nil) async -> String? {
         guard !busy else { return nil }
-        guard WorkCoordinator.shared.available else { status = "paused — open the app to pair"; return nil }
+        guard WorkCoordinator.shared.available else { status = "Paused — open the app to pair"; return nil }
         connectionIssue = nil
         busy = true
         paused = false
@@ -577,7 +577,7 @@ final class RingSync: ObservableObject {
         }
 
         dlog("pair", "start — scanning for a reset ring")
-        status = "looking for a ring on its charger…"
+        status = "Looking for a ring on its charger…"
         let t = BLETransport(nameContains: "Oura")
         transport = t
         do {
@@ -587,7 +587,7 @@ final class RingSync: ObservableObject {
             if case BLEError.poweredOff = error {
                 status = "Bluetooth unavailable — check power and permission in Settings"
             } else {
-                status = "couldn't connect (\(error)) — put the reset ring on its charger next to this iPhone"
+                status = "Couldn't connect (\(error)) — put the reset ring on its charger next to this iPhone"
             }
             return nil
         }
@@ -600,7 +600,7 @@ final class RingSync: ObservableObject {
             s.cancel(reason: "transport closed")
         }
 
-        status = "installing a new key…"
+        status = "Installing a new key…"
         do {
             let report = try await s.pair(existingKeyHex: existingKeyHex)
             // Persist BEFORE anything else can fail: the ring now holds this key and
@@ -609,11 +609,11 @@ final class RingSync: ObservableObject {
             rememberSerial(report.serial)
             rememberPeripheral(t.connectedPeripheralID)
             dlog("pair", "paired \(report.serial) minted=\(report.minted)")
-            status = "paired with \(report.serial) — key saved to this iPhone. Back it up: it can't be read off the ring."
+            status = "Paired with \(report.serial) — key saved to this iPhone. Back it up: it can't be read off the ring."
             return report.keyHex
         } catch {
             dlog("pair", "FAILED: \(error)")
-            status = "pairing failed: \(error)"
+            status = "Pairing failed: \(error)"
             return nil
         }
     }
@@ -631,7 +631,7 @@ final class RingSync: ObservableObject {
         dlog("sync", "start run=\(runID) source=\(source)")
         guard key.utf8.count == 32, key.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else {
             dlog("sync", "rejected key: len=\(key.count) (need 32 hex chars)")
-            status = "key must be 32 hex characters"
+            status = "Key must be 32 hex characters"
             return nil
         }
         guard WorkCoordinator.shared.available else { status = "Sync paused. Open the app to resume."; return nil }
@@ -842,10 +842,10 @@ final class RingSync: ObservableObject {
                     guard rate > 0 else { return nil }
                     return Self.fmtDuration(Double(bytesLeft) / rate)
                 }
-                status = "syncing… ~\(Self.fmtBytes(bytesLeft)) left · \(events) events"
+                status = "Syncing… ~\(Self.fmtBytes(bytesLeft)) left · \(events) events"
                     + (eta.map { " · about \($0)" } ?? "")
             } else if events > 0 {
-                status = "syncing… \(events) events · finishing up"
+                status = "Syncing… \(events) events · finishing up"
             } else {
                 status = "Syncing…"
             }
