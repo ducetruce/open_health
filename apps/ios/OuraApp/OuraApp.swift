@@ -829,6 +829,7 @@ struct RootView: View {
     @ObservedObject private var units = UnitSettings.shared
     @State private var tab: AppTab = .today
     @State private var sleepDay = ""
+    @State private var readinessExpanded = false
     @State private var showStartWorkout = false
     @State private var showLogWorkout = false
     private func f(_ v: Double?, _ fallback: String = "–") -> String {
@@ -1134,25 +1135,59 @@ struct RootView: View {
             let night = s.night(forDay: day) ?? s.nights.first
             let st = s.activity_daily[localDay()] ?? s.activity_daily[day]
             VStack(alignment: .leading, spacing: 18) {
-                // headline rings: sleep score, activity goal, HRV vs baseline
+                // headline rings: readiness, sleep score, progress toward activity goals
                 HStack {
+                    Button { readinessExpanded.toggle() } label: {
+                        ScoreRing(value: night?.readiness.map { "\(Int($0.score))" } ?? "–", caption: "readiness",
+                                  progress: night?.readiness.map { $0.score / 100 }, accent: Obs.readinessAccent)
+                    }
+                    Spacer()
                     Button { tab = .sleep } label: {
                         ScoreRing(value: night?.sleep_score.map { "\(Int($0.score))" } ?? "–", caption: "sleep",
                                   progress: night?.sleep_score.map { $0.score / 100 }, accent: Obs.sleepAccent)
                     }
                     Spacer()
                     Button { tab = .activity } label: {
-                        ScoreRing(value: st?.active_kcal.map { "\(Int($0))" } ?? "–", caption: "active kcal",
-                                  progress: st?.active_kcal.map { $0 / ActivityGoals.activeKcal }, accent: Obs.activityAccent)
-                    }
-                    Spacer()
-                    Button { tab = .vitals } label: {
-                        ScoreRing(value: f(s.vitals.hrv.latest), caption: "hrv · ms",
-                                  progress: hrvProgress(s), accent: Obs.readinessAccent)
+                        let goal = activityGoalProgress(st)
+                        ScoreRing(value: goal.map { "\(Int(($0 * 100).rounded()))%" } ?? "–", caption: "activity goal",
+                                  progress: goal, accent: Obs.activityAccent)
                     }
                 }
                 .buttonStyle(.plain)
                 .obsCard(padding: 20)
+
+                if let readiness = night?.readiness {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button { readinessExpanded.toggle() } label: {
+                            HStack {
+                                ObsTag("readiness", icon: "bolt.heart.fill")
+                                Spacer()
+                                Image(systemName: readinessExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Obs.muted)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if readinessExpanded {
+                            SleepScoreCard(score: readiness)
+                            if readiness.provisional == true {
+                                Text("Readiness compares each night with your own recent nights. It becomes settled after about two weeks of synced nights.")
+                                    .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        } else {
+                            Text(readinessSummary(readiness))
+                                .font(.system(size: 14)).foregroundStyle(Obs.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .obsCard()
+                } else if night != nil {
+                    Text("Readiness appears after a few nights have been synced: it compares each night with your own baseline.")
+                        .font(.system(size: 14)).foregroundStyle(Obs.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .obsCard()
+                }
 
                 if let d = s.digest {
                     Text(d).font(.system(size: 16)).foregroundStyle(Obs.ink)
@@ -1201,6 +1236,22 @@ struct RootView: View {
             }
             .padding(.horizontal, 20)
         }
+    }
+
+    /// Average progress toward the daily calorie and step goals, 0…1 (capped).
+    private func activityGoalProgress(_ st: DailyStat?) -> Double? {
+        guard let st else { return nil }
+        let kcal = (st.active_kcal ?? 0) / ActivityGoals.activeKcal
+        let steps = (st.steps ?? 0) / ActivityGoals.steps
+        return min(1, (min(1, kcal) + min(1, steps)) / 2)
+    }
+
+    /// One line naming the strongest and weakest readiness contributors.
+    private func readinessSummary(_ r: SleepScore) -> String {
+        let sorted = r.components.sorted { $0.score > $1.score }
+        guard let best = sorted.first, let worst = sorted.last else { return scoreBasisLabel(r) }
+        if worst.score >= 80 { return "Everything looks on track. Strongest: \(best.label) (\(Int(best.score)))." }
+        return "Strongest: \(best.label) (\(Int(best.score))). Needs attention: \(worst.label) (\(Int(worst.score)))."
     }
 
     /// HRV relative to its baseline, mapped so baseline sits at 75%.

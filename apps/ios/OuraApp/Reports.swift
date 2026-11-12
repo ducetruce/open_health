@@ -1070,6 +1070,17 @@ struct SleepDebtCard: View {
     }
 }
 
+/// What a score is based on, in words: shown under every score.
+func scoreBasisLabel(_ score: SleepScore) -> String {
+    let basis = score.basis ?? "published norms"
+    let label: String
+    if basis.hasPrefix("published norms") { label = "Published sleep norms" }
+    else if basis == "estimate" { label = "Estimate from your baseline" }
+    else if basis == "oura-calibrated" { label = "Calibrated to your Oura history" }
+    else { label = Fmt.sentence(basis) }
+    return score.provisional == true ? label + " · provisional" : label
+}
+
 // A readable summary first; personal ranges are available on demand.
 /// The literature-based sleep score, with its components opened up.
 ///
@@ -1095,7 +1106,7 @@ struct SleepScoreCard: View {
                     .font(Obs.mono(38, .medium)).foregroundStyle(tint).monospacedDigit()
                 VStack(alignment: .leading, spacing: 2) {
                     Text("/ 100").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
-                    Text(Fmt.sentence(score.basis ?? "published norms"))
+                    Text(scoreBasisLabel(score))
                         .font(Obs.mono(9)).foregroundStyle(Obs.muted)
                 }
                 Spacer()
@@ -1132,11 +1143,13 @@ struct SleepScoreCard: View {
                 }
             }
 
-            Button { expanded.toggle() } label: {
-                Text(expanded ? "Hide sources" : "Show sources")
-                    .font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+            if score.components.contains(where: { $0.source != nil }) {
+                Button { expanded.toggle() } label: {
+                    Text(expanded ? "Hide sources" : "Show sources")
+                        .font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .obsCard()
     }

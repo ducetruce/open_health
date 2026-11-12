@@ -13,6 +13,7 @@
 //! `docs/clients-web-and-ios.md`.
 
 pub mod hourly_hr;
+pub mod readiness;
 pub mod research_export;
 pub mod ring_time;
 pub mod sleep_score;
@@ -2480,6 +2481,10 @@ pub fn build_summary(
     // self-inclusion or future-data leakage.
     let mut prior_main_rhr: Vec<(f64, f64)> = Vec::new();
     let mut prior_main_hrv: Vec<(f64, f64)> = Vec::new();
+    // Readiness baselines: (end_unix, value) of earlier main sleeps, oldest first.
+    let mut prior_main_ends: Vec<f64> = Vec::new();
+    let mut prior_main_temp: Vec<(f64, f64)> = Vec::new();
+    let mut prior_main_asleep: Vec<(f64, f64)> = Vec::new();
     for nt in &nights {
         let hyp = hyps.get(&(nt.start_ds, nt.captured_unix));
         let raw_stages: Vec<i64> = hyp
@@ -2686,13 +2691,62 @@ pub fn build_summary(
         });
         night_json["stages_5min"] = json!(stages_5min);
         night_json["stages_t0_unix"] = json!(stages_t0_unix);
+        let night_temp = nightly_skin_temp(&nt.temp);
+        let night_asleep = (complete_staging && asleep_s > 0).then_some(asleep_s as f64);
+        night_json["readiness"] = if is_main_sleep && (raw_lowest_hr.is_some() || raw_mean_hrv.is_some()) {
+            // Trailing baseline: up to 14 earlier main sleeps from the last 21 days.
+            let window_start = end_unix - 21.0 * 86_400.0;
+            let recent = |v: &[(f64, f64)]| -> Vec<f64> {
+                v.iter()
+                    .rev()
+                    .filter(|&&(end, _)| end <= start_unix && end >= window_start)
+                    .take(readiness::MATURE_NIGHTS)
+                    .map(|&(_, x)| x)
+                    .collect()
+            };
+            let baseline = |v: &[(f64, f64)]| {
+                let values = recent(v);
+                (values.len() >= readiness::MIN_BASELINE_NIGHTS)
+                    .then(|| mean(&values))
+                    .flatten()
+            };
+            let mut sleep_window = recent(&prior_main_asleep);
+            sleep_window.extend(night_asleep);
+            readiness::estimate(&readiness::ReadinessInput {
+                sleep_score: night_json["sleep_score"]["score"].as_f64(),
+                lowest_hr: raw_lowest_hr,
+                baseline_lowest_hr: baseline(&prior_main_rhr),
+                hrv_ms: raw_mean_hrv,
+                baseline_hrv_ms: baseline(&prior_main_hrv),
+                skin_temp: night_temp,
+                baseline_skin_temp: baseline(&prior_main_temp),
+                recent_sleep_s: (sleep_window.len() > readiness::MIN_BASELINE_NIGHTS)
+                    .then(|| mean(&sleep_window))
+                    .flatten(),
+                recovery_index_h: readiness::recovery_index_h(&nt.hr_t, nt.end_ds),
+                history_nights: prior_main_ends
+                    .iter()
+                    .filter(|&&end| end <= start_unix && end >= window_start)
+                    .count()
+                    .min(readiness::MATURE_NIGHTS),
+            })
+        } else {
+            Value::Null
+        };
         nights_json.push(night_json);
         if is_main_sleep {
+            prior_main_ends.push(end_unix);
             if let Some(lowest) = raw_lowest_hr {
                 prior_main_rhr.push((end_unix, lowest));
             }
             if let Some(hrv_mean) = raw_mean_hrv {
                 prior_main_hrv.push((end_unix, hrv_mean));
+            }
+            if let Some(temp) = night_temp {
+                prior_main_temp.push((end_unix, temp));
+            }
+            if let Some(asleep) = night_asleep {
+                prior_main_asleep.push((end_unix, asleep));
             }
         }
         if let Some(day) = wake_ymd.clone() {
@@ -3939,6 +3993,24 @@ mod tests {
             "3rd main night has only 2 prior main nights (nap excluded) and must omit physiology"
         );
 
+        // Readiness: the 4th main night has a baseline to compare with; the 3rd does
+        // not (the nap is excluded), and the nap itself never gets a readiness score.
+        let readiness3 = &nights_before[0]["readiness"];
+        assert!(readiness3["score"].as_f64().is_some(), "{readiness3}");
+        assert_eq!(readiness3["basis"], "estimate");
+        assert_eq!(readiness3["provisional"], true);
+        let keys: Vec<&str> = readiness3["components"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c["key"].as_str())
+            .collect();
+        assert!(keys.contains(&"resting_hr") && keys.contains(&"hrv_balance"), "{keys:?}");
+        // Night 3 has HR 54 vs a 50/52/48 baseline and HRV 50 vs 60/58/62: below par.
+        assert!(readiness3["score"].as_f64().unwrap() < 90.0, "{readiness3}");
+        assert!(nights_before[1]["readiness"].is_null());
+        assert!(nights_before.iter().filter(|n| !n["readiness"].is_null()).count() == 1);
+
         // Now append a future Night 4 with extreme RHR (99 bpm) and HRV (8 ms) and verify
         // earlier nights' sleep scores and physiology components are 100% unchanged.
         let conn = rusqlite::Connection::open(&db).unwrap();
@@ -3954,6 +4026,11 @@ mod tests {
                 nights_after[i + 1]["sleep_score"],
                 nights_before[i]["sleep_score"],
                 "future night leaked into historical night at offset {i}"
+            );
+            assert_eq!(
+                nights_after[i + 1]["readiness"],
+                nights_before[i]["readiness"],
+                "future night leaked into historical readiness at offset {i}"
             );
         }
 

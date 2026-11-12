@@ -83,6 +83,8 @@ struct NightRow: Codable, Identifiable {
     /// Nightly respiratory rate (breaths/min), the ring's own per-window estimate.
     var breath_rate: Double? = nil
     var sleep_score: SleepScore? = nil
+    /// How recovered this night left you, against your own recent nights.
+    var readiness: SleepScore? = nil
     var id: String { (date ?? "") + (start ?? "") }
     var hasHypnogram: Bool { (hypnogram?.count ?? 0) > 1 }
     var isBedtimeManual: Bool { bedtime_manual ?? false }
@@ -107,6 +109,14 @@ struct SleepScoreComponent: Codable, Identifiable {
         case "awakenings": return "Awakenings"
         case "architecture": return "Stage balance"
         case "physiology": return "Heart rate & HRV"
+        case "resting_hr": return "Resting heart rate"
+        case "previous_night": return "Previous night"
+        case "hrv_balance": return "HRV balance"
+        case "temperature": return "Body temperature"
+        case "sleep_balance": return "Sleep balance"
+        case "recovery_index": return "Recovery index"
+        case "previous_day_activity": return "Previous day activity"
+        case "activity_balance": return "Activity balance"
         default: return key
         }
     }
@@ -122,6 +132,8 @@ struct SleepScore: Codable {
     var score: Double
     var components: [SleepScoreComponent] = []
     var basis: String?
+    /// True while the personal baselines behind the score are still filling in.
+    var provisional: Bool? = nil
 }
 
 /// Minimal JSON value, so a component's `detail` can be carried through and read

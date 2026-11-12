@@ -75,6 +75,18 @@ for k in range(12, -1, -1):
                 {"key": "physiology", "score": score - 2, "weight": 0.3},
             ],
         },
+        # The first few nights have no baseline yet, like a fresh install.
+        "readiness": None if k > 9 else {
+            "score": score - 4, "basis": "estimate", "provisional": True,
+            "components": [
+                {"key": "resting_hr", "score": min(100, score + 6), "weight": 0.21},
+                {"key": "previous_night", "score": score, "weight": 0.18},
+                {"key": "hrv_balance", "score": score - 14, "weight": 0.18},
+                {"key": "temperature", "score": 96, "weight": 0.16},
+                {"key": "sleep_balance", "score": score - 8, "weight": 0.15},
+                {"key": "recovery_index", "score": 70, "weight": 0.12},
+            ],
+        },
     })
 nights.reverse()  # newest first, like the summary
 
