@@ -25,7 +25,7 @@ struct TodayCard: View {
                         HStack {
                             ObsTag("sleep", icon: "moon.fill")
                             Spacer()
-                            Text(n.in_bed_h.map { String(format: "%.1fh", $0) } ?? "–")
+                            Text(Fmt.duration(seconds: n.durationS))
                                 .font(Obs.mono(11)).foregroundStyle(Obs.ink2)
                             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                         }
@@ -33,7 +33,7 @@ struct TodayCard: View {
                             .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
                         if n.hasHypnogram { Hypnogram(stages: n.hypnogram!, height: 28) }
                         else if let e = n.efficiency {
-                            Text("efficiency \(Int(e))%").font(Obs.mono(12))
+                            Text("Efficiency \(Int(e))%").font(Obs.mono(12))
                                 .foregroundStyle(e >= 85 ? Obs.good : (e < 75 ? Obs.bad : Obs.ink2))
                         }
                     }
@@ -51,8 +51,8 @@ struct TodayCard: View {
                         ObsTag("activity", icon: "figure.walk")
                         Spacer()
                         if let st = s.activity_daily[day] {
-                            Text("\(Int(st.steps ?? 0)) steps").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
-                            Text("· \(Int(st.active_kcal ?? 0)) kcal").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                            Text("\(Fmt.count(st.steps ?? 0)) steps").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                            Text("· \(Fmt.count(st.active_kcal ?? 0)) kcal").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
                         }
                         Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                     }
@@ -130,14 +130,14 @@ struct AllDaysView: View {
         HStack(spacing: 12) {
             // weekday over day-of-month, a fixed column so the rows line up
             VStack(alignment: .leading, spacing: 1) {
-                Text(date.map { Self.weekday.string(from: $0).lowercased() } ?? "")
+                Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
                     .font(Obs.mono(9)).tracking(0.8).foregroundStyle(Obs.muted)
                 Text(String(day.suffix(2))).font(Obs.mono(17, .medium)).foregroundStyle(Obs.ink).monospacedDigit()
             }
             .frame(width: 36, alignment: .leading)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(night?.in_bed_h.map { String(format: "%.1fh", $0) } ?? "–")
+                    Text(night.map { Fmt.duration(seconds: $0.durationS) } ?? "–")
                         .font(Obs.mono(12, .medium)).foregroundStyle(night == nil ? Obs.muted : Obs.ink)
                     if let st = stat, let steps = st.steps {
                         Text("·").foregroundStyle(Obs.trace)
@@ -146,7 +146,7 @@ struct AllDaysView: View {
                     }
                     if let st = stat, let kcal = st.active_kcal, kcal > 0 {
                         Text("·").foregroundStyle(Obs.trace)
-                        Text("\(Int(kcal)) kcal").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                        Text("\(Fmt.count(kcal)) kcal").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
                     }
                 }
                 if let n = night, n.hasHypnogram {
@@ -836,22 +836,22 @@ struct RootView: View {
         let a = abs((diff * 10).rounded() / 10)
         if diff < -0.05 { return "\(a) yr younger" }
         if diff > 0.05 { return "\(a) yr older" }
-        return "in line"
+        return "In line"
     }
     private func localDay(_ date: Date = Date()) -> String {
         let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
     private func displayedDayLabel(_ day: String, now: Date = Date()) -> String {
-        if day == localDay(now) { return "today" }
+        if day == localDay(now) { return "Today" }
         if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now),
-           day == localDay(yesterday) { return "yesterday" }
+           day == localDay(yesterday) { return "Yesterday" }
         return day
     }
     private func latestLabel(date: String?, time: String? = nil) -> String {
-        let day = date.map { String($0.suffix(5)) }
+        let day = date.map { Fmt.day($0) }
         let stamp = [day, time].compactMap { $0 }.joined(separator: " · ")
-        return stamp.isEmpty ? "latest sync" : "latest · \(stamp)"
+        return stamp.isEmpty ? "Latest sync" : "Latest · \(stamp)"
     }
     var body: some View {
         ZStack {
@@ -1168,7 +1168,7 @@ struct RootView: View {
                     HStack(spacing: 9) {
                         ObsTag(displayedDayLabel(day), icon: "sun.max.fill").fixedSize()
                         if displayedDayLabel(day) != day {
-                            Text(String(day.suffix(5))).font(Obs.mono(11)).foregroundStyle(Obs.muted)
+                            Text(Fmt.day(day)).font(Obs.mono(11)).foregroundStyle(Obs.muted)
                         }
                         if ring.busy || isRefreshingSummary {
                             ProgressView().controlSize(.mini).tint(Obs.ink)
@@ -1243,7 +1243,7 @@ struct RootView: View {
             ScoreRing(value: n.sleep_score.map { "\(Int($0.score))" } ?? "–", caption: "sleep score",
                       progress: n.sleep_score.map { $0.score / 100 }, accent: Obs.sleepAccent, size: 108, lineWidth: 10)
             VStack(alignment: .leading, spacing: 10) {
-                heroStat("Time in bed", n.in_bed_h.map { String(format: "%.1f h", $0) })
+                heroStat("Time in bed", Fmt.duration(seconds: n.durationS))
                 heroStat("Efficiency", n.efficiency.map { "\(Int($0))%" })
                 heroStat("Resting HR", n.rhr.map { "\(Int($0)) bpm" })
                 heroStat("HRV", n.hrv_ms.map { "\(Int($0)) ms" })
@@ -1285,14 +1285,14 @@ struct RootView: View {
                                   baseline: s.vitals.rhr.baseline,
                                   deltaGoodWhenPositive: false,
                                   detail: latestHR.map { latestLabel(date: $0.date, time: $0.hm) }
-                                      ?? "nightly minimum",
+                                      ?? "Nightly minimum",
                                   action: { vital = .heartRate })
                     }
                     Rectangle().fill(Obs.rule).frame(height: 1)
                     HStack(alignment: .top, spacing: 24) {
                         VitalCell(tag: "skin temp",
                                   value: latestTemp?.skin_temp.map { String(format: "%.1f", $0) } ?? "–",
-                                  unit: "°c",
+                                  unit: "°C",
                                   series: recentTemperatures,
                                   detail: latestTemp.map { latestLabel(date: s.wakeYmd($0)) },
                                   action: { vital = .temp })

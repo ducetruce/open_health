@@ -205,7 +205,7 @@ struct VitalCell: View {
                 Text(unit).font(Obs.mono(11)).foregroundStyle(Obs.ink2)
             }
             if let d = delta {
-                Text("\(d >= 0 ? "+" : "")\(d, specifier: "%.0f")% vs base")
+                Text("\(d >= 0 ? "+" : "")\(d, specifier: "%.0f")% vs baseline")
                     .font(Obs.mono(10))
                     .foregroundStyle(tone)
             }
@@ -230,7 +230,7 @@ struct VitalCell: View {
 }
 
 enum VitalPeriod: String, CaseIterable {
-    case d7 = "7d", d14 = "14d", d30 = "30d", d90 = "90d", all = "all"
+    case d7 = "7D", d14 = "14D", d30 = "30D", d90 = "90D", all = "All"
     var days: Int? {
         switch self {
         case .d7: return 7
@@ -257,7 +257,7 @@ private enum YMD {
     }()
     static func date(_ s: String) -> Date? { fmt.date(from: s) }
     static func string(_ d: Date) -> String { fmt.string(from: d) }
-    static func short(_ s: String) -> String { String(s.suffix(5)) }
+    static func short(_ s: String) -> String { Fmt.day(s) }
 }
 
 struct VitalTrendView: View {
@@ -310,9 +310,9 @@ struct VitalTrendView: View {
                                 Text(kind.unit).font(Obs.mono(14)).foregroundStyle(Obs.ink2)
                             }
                             HStack(spacing: 8) {
-                                Text(last.date).font(Obs.mono(12)).foregroundStyle(Obs.muted)
+                                Text(Fmt.day(last.date)).font(Obs.mono(12)).foregroundStyle(Obs.muted)
                                 if let d = deltaPct {
-                                    Text("\(d >= 0 ? "+" : "")\(d, specifier: "%.0f")% vs base")
+                                    Text("\(d >= 0 ? "+" : "")\(d, specifier: "%.0f")% vs baseline")
                                         .font(Obs.mono(12)).foregroundStyle(accent)
                                 }
                             }
@@ -324,10 +324,10 @@ struct VitalTrendView: View {
                             let values = points.map(\.value)
                             let avg = values.reduce(0, +) / Double(values.count)
                             VStack(spacing: 10) {
-                                ObsStat(label: "average", value: "\(format(avg)) \(kind.unit)")
-                                if let lo = values.min() { ObsStat(label: "low", value: "\(format(lo)) \(kind.unit)") }
-                                if let hi = values.max() { ObsStat(label: "high", value: "\(format(hi)) \(kind.unit)") }
-                                ObsStat(label: "nights", value: "\(points.count)")
+                                ObsStat(label: "Average", value: "\(format(avg)) \(kind.unit)")
+                                if let lo = values.min() { ObsStat(label: "Low", value: "\(format(lo)) \(kind.unit)") }
+                                if let hi = values.max() { ObsStat(label: "High", value: "\(format(hi)) \(kind.unit)") }
+                                ObsStat(label: "Nights", value: "\(points.count)")
                             }
                             .obsCard()
                         } else if all.isEmpty {
@@ -446,7 +446,7 @@ private struct VitalTrendChart: View {
             if baseline != nil {
                 HStack(spacing: 5) {
                     Rectangle().fill(Obs.ink.opacity(0.35)).frame(width: 16, height: 1)
-                    Text("baseline").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                    Text("Baseline").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
                 }
             }
         }

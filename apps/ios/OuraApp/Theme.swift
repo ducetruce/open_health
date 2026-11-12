@@ -158,3 +158,58 @@ struct ObsStat: View {
         }
     }
 }
+
+/// Exact, readable formatting shared by every screen: durations as hours and
+/// minutes, counts with thousands separators, dates as words rather than MM-DD.
+enum Fmt {
+    /// "7h 42m", "42m", or "–". Rounded to the nearest minute, never to tenths of an hour.
+    static func duration(seconds: Double?) -> String {
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return "–" }
+        let total = Int((seconds / 60).rounded())
+        if total < 60 { return "\(total)m" }
+        return "\(total / 60)h \(String(format: "%02d", total % 60))m"
+    }
+
+    static func duration(minutes: Double?) -> String {
+        duration(seconds: minutes.map { $0 * 60 })
+    }
+
+    private static let grouped: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    /// A whole number with thousands separators: "8,437". Never abbreviated.
+    static func count(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "–" }
+        return grouped.string(from: NSNumber(value: value.rounded())) ?? "\(Int(value.rounded()))"
+    }
+
+    private static let ymdParser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let monthDay: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMMd")
+        return f
+    }()
+
+    /// First letter capitalised, the rest untouched: "published norms" → "Published norms".
+    static func sentence(_ text: String) -> String {
+        guard let first = text.first else { return text }
+        return first.uppercased() + text.dropFirst()
+    }
+
+    /// "Nov 9" for a "2026-11-09" day key (the original string if it isn't one).
+    static func day(_ ymd: String?) -> String {
+        guard let ymd else { return "–" }
+        guard let date = ymdParser.date(from: String(ymd.prefix(10))) else { return ymd }
+        return monthDay.string(from: date)
+    }
+}

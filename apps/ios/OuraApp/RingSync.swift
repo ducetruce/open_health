@@ -863,7 +863,7 @@ final class RingSync: ObservableObject {
         if s < 60 { return "\(s)s" }
         let minutes = Int((Double(s) / 60).rounded())
         if minutes < 60 { return "\(minutes) min" }
-        return String(format: "%.1f h", Double(minutes) / 60)
+        return Fmt.duration(minutes: Double(minutes))
     }
 
     private static func isAuthenticationFailure(_ error: Error) -> Bool {

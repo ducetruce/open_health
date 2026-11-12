@@ -2810,7 +2810,8 @@ pub fn build_summary(
     let activity_daily: Value = daily
         .iter()
         .map(|(k, (act, steps))| {
-            let steps_r = (steps / 100.0).round() * 100.0;
+            // Whole steps, not rounded to the hundred: the app shows the exact count.
+            let steps_r = steps.round();
             // walking distance from steps via ecore's actinfo_steps_to_meters (0.762 m/step)
             let distance_m = oura_analysis::ported::metabolic::steps_to_meters(steps_r as u32);
             (

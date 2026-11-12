@@ -198,7 +198,7 @@ struct RawDataView: View {
 
     private var kindList: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("event types").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+            Text("Event types").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
             ForEach(kinds) { k in
                 Button {
                     filter = (filter == k.name) ? "" : k.name
@@ -216,7 +216,7 @@ struct RawDataView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Text("count shown as decoded/total when some bodies have no decoder yet.")
+            Text("Count shown as decoded/total when some bodies have no decoder yet.")
                 .font(.footnote).foregroundStyle(Obs.ink2)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -226,7 +226,7 @@ struct RawDataView: View {
     private var chart: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("chart").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                Text("Chart").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
                 if loadingEvents { ProgressView().controlSize(.mini).tint(Obs.muted) }
                 Spacer()
                 if !fields.isEmpty {
@@ -265,7 +265,7 @@ struct RawDataView: View {
 
     private var eventList: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("newest first · \(events.count) shown")
+            Text("Newest first · \(events.count) shown")
                 .font(Obs.mono(11)).foregroundStyle(Obs.ink2)
             ForEach(events.prefix(60)) { e in
                 VStack(alignment: .leading, spacing: 4) {

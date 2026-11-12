@@ -113,9 +113,9 @@ struct WorkoutRow: View {
     var kcal: Double? = nil
 
     private var badge: String? {
-        if session.isAuto { return "detected" }
+        if session.isAuto { return "Detected" }
         if session.isUser { return nil }
-        return "auto"
+        return "Auto"
     }
 
     var body: some View {
@@ -146,7 +146,7 @@ struct WorkoutRow: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text("\(session.durationMin) min").font(Obs.mono(15, .semibold)).foregroundStyle(Obs.ink)
                 if let kcal, kcal > 0 {
-                    Text("\(Int(kcal)) kcal").font(Obs.mono(12)).foregroundStyle(Obs.muted)
+                    Text("\(Fmt.count(kcal)) kcal").font(Obs.mono(12)).foregroundStyle(Obs.muted)
                 }
             }
             Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Obs.muted)
@@ -678,10 +678,10 @@ struct ActivityTab<Header: View>: View {
         let mins = s.workoutsOn(day).reduce(0) { $0 + $1.durationMin }
         return VStack(spacing: 12) {
             HStack {
-                ScoreRing(value: kcal.map { "\(Int($0))" } ?? "–", caption: "active kcal",
+                ScoreRing(value: kcal.map { Fmt.count($0) } ?? "–", caption: "active kcal",
                           progress: kcal.map { $0 / ActivityGoals.activeKcal }, accent: Obs.activityAccent, size: 96)
                 Spacer()
-                ScoreRing(value: steps.map { $0 >= 10_000 ? String(format: "%.1fk", $0 / 1000) : "\(Int($0))" } ?? "–",
+                ScoreRing(value: steps.map { Fmt.count($0) } ?? "–",
                           caption: "steps (est.)",
                           progress: steps.map { $0 / ActivityGoals.steps }, accent: Obs.readinessAccent, size: 96)
                 Spacer()
@@ -689,7 +689,7 @@ struct ActivityTab<Header: View>: View {
                           progress: Double(mins) / 30, accent: Obs.heartAccent, size: 96)
             }
             Button { showGoals = true } label: {
-                Text("Goals: \(Int(ActivityGoals.activeKcal)) kcal · \(Int(ActivityGoals.steps)) steps")
+                Text("Goals: \(Fmt.count(ActivityGoals.activeKcal)) kcal · \(Fmt.count(ActivityGoals.steps)) steps")
                     .font(.system(size: 12, weight: .medium)).foregroundStyle(Obs.muted)
             }
             .buttonStyle(.plain)

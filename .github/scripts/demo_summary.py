@@ -97,7 +97,7 @@ for k in range(13):
         prof.append(round(max(0, base + rng.uniform(-0.2, 0.4)), 2))
     profile[ymd(d)] = prof
     act = round(sum(prof) * 70 / 4 / 1.2)
-    steps = round((5200 + rng.randint(0, 6000)) * (hours_done / 24), -2)
+    steps = round((5200 + rng.randint(0, 6000)) * (hours_done / 24))
     daily[ymd(d)] = {"active_kcal": act, "total_kcal": act + 1650, "steps": steps,
                      "distance_m": round(steps * 0.762)}
 

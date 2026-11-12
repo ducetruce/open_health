@@ -100,13 +100,13 @@ struct SleepScoreComponent: Codable, Identifiable {
     var id: String { key }
     var label: String {
         switch key {
-        case "duration": return "duration"
-        case "efficiency": return "efficiency"
-        case "onset_latency": return "time to fall asleep"
-        case "waso": return "awake during the night"
-        case "awakenings": return "awakenings"
-        case "architecture": return "stage balance"
-        case "physiology": return "heart & HRV"
+        case "duration": return "Duration"
+        case "efficiency": return "Efficiency"
+        case "onset_latency": return "Time to fall asleep"
+        case "waso": return "Awake during the night"
+        case "awakenings": return "Awakenings"
+        case "architecture": return "Stage balance"
+        case "physiology": return "Heart rate & HRV"
         default: return key
         }
     }

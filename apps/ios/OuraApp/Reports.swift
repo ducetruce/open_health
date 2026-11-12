@@ -1045,7 +1045,7 @@ struct SleepDebtCard: View {
                 HStack {
                     ObsTag("sleep debt", icon: "moon.zzz.fill")
                     Spacer()
-                    Text("past \(debt.window_days) days").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                    Text("Past \(debt.window_days) days").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
                     Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                 }
                 if debt.valid {
@@ -1092,7 +1092,7 @@ struct SleepScoreCard: View {
                     .font(Obs.mono(38, .medium)).foregroundStyle(tint).monospacedDigit()
                 VStack(alignment: .leading, spacing: 2) {
                     Text("/ 100").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
-                    Text(score.basis ?? "published norms")
+                    Text(Fmt.sentence(score.basis ?? "published norms"))
                         .font(Obs.mono(9)).foregroundStyle(Obs.muted)
                 }
                 Spacer()
@@ -1130,7 +1130,7 @@ struct SleepScoreCard: View {
             }
 
             Button { expanded.toggle() } label: {
-                Text(expanded ? "hide sources" : "show sources")
+                Text(expanded ? "Hide sources" : "Show sources")
                     .font(Obs.mono(10)).foregroundStyle(Obs.ink2)
             }
             .buttonStyle(.plain)
@@ -1332,7 +1332,7 @@ private struct SleepDebtChart: View {
                 Text(debt.days.first.map { String($0.date.suffix(5)) } ?? "").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
                 Spacer()
                 if mode == .sleep {
-                    HStack(spacing: 5) { Rectangle().fill(Obs.ink.opacity(0.45)).frame(width: 16, height: 1); Text("sleep need").font(Obs.mono(10)).foregroundStyle(Obs.ink2) }
+                    HStack(spacing: 5) { Rectangle().fill(Obs.ink.opacity(0.45)).frame(width: 16, height: 1); Text("Sleep need").font(Obs.mono(10)).foregroundStyle(Obs.ink2) }
                 }
                 Spacer()
                 Text(debt.days.last.map { String($0.date.suffix(5)) } ?? "").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
@@ -1369,7 +1369,7 @@ struct SleepDebtDetail: View {
                     }.padding(24)
                 }
             }
-            .navigationTitle("sleep debt").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Sleep debt").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
     }
@@ -1575,12 +1575,11 @@ struct SleepReport: View {
     var body: some View {
         if let n = s.night(forDay: day) {
             let metrics = (n.hypnogram.flatMap { st in Sleep.metrics(Sleep.isOuraStaging(n.staging_source) ? st : Sleep.smooth(st, 5), inBedS: n.durationS) })
-            let asleepH = metrics.map { $0.asleepMin / 60 }
 
             // summary strip
             HStack(alignment: .top, spacing: 0) {
-                Readout(value: n.in_bed_h.map { String(format: "%.1f h", $0) } ?? "–", caption: "in bed")
-                Readout(value: asleepH.map { String(format: "%.1f h", $0) } ?? "–", caption: "asleep")
+                Readout(value: Fmt.duration(seconds: n.durationS), caption: "in bed")
+                Readout(value: Fmt.duration(minutes: metrics?.asleepMin), caption: "asleep")
                 Readout(value: n.efficiency.map { "\(Int($0))%" } ?? "–", caption: "efficiency")
                 Button {
                     bedtimeDate = Self.dateFromHM(n.start)
@@ -1676,7 +1675,7 @@ struct SleepReport: View {
                         editingBedtime = false
                     }
                 } label: {
-                    Text(savingBedtime ? "saving…" : "apply")
+                    Text(savingBedtime ? "Saving…" : "Apply")
                         .font(Obs.mono(11, .medium))
                         .foregroundStyle(Obs.paper)
                         .padding(.horizontal, 12).padding(.vertical, 5)
@@ -1695,7 +1694,7 @@ struct SleepReport: View {
                             editingBedtime = false
                         }
                     } label: {
-                        Text("reset\(n.raw_start.map { " (\($0)–\(n.raw_end ?? ""))" } ?? "")")
+                        Text("Reset\(n.raw_start.map { " (\($0)–\(n.raw_end ?? ""))" } ?? "")")
                             .font(Obs.mono(11))
                             .foregroundStyle(Obs.ink2)
                             .padding(.horizontal, 10).padding(.vertical, 5)
@@ -1708,7 +1707,7 @@ struct SleepReport: View {
                 Button {
                     editingBedtime = false
                 } label: {
-                    Text("cancel").font(Obs.mono(11)).foregroundStyle(Obs.muted)
+                    Text("Cancel").font(Obs.mono(11)).foregroundStyle(Obs.muted)
                 }
                 .buttonStyle(.plain)
                 .disabled(savingBedtime)
@@ -1740,7 +1739,7 @@ struct SleepReport: View {
     }
 
     @ViewBuilder private func clinicalGrid(_ m: SleepMetrics) -> some View {
-        let mins = { (x: Double?) in x.map { "\(Int($0.rounded())) min" } ?? "–" }
+        let mins = { (x: Double?) in x.map { Fmt.duration(minutes: $0) } ?? "–" }
         let cells: [(String, String)] = [
             ("sleep onset", mins(m.solMin)),
             ("rem latency", mins(m.remLatencyMin)),
@@ -1778,7 +1777,7 @@ struct SleepReport: View {
             if let d = s.sleepDebt, d.valid {
                 summaryRow(icon: "bed.double", tint: Obs.debt(d.state), label: "Sleep debt",
                            value: debtDuration(d.debt_min),
-                           detail: "vs \(debtDuration(d.need_h * 60)) nightly need"
+                           detail: "Vs \(debtDuration(d.need_h * 60)) nightly need"
                                + (d.recent_shortfall_min > 0 ? " · last day \(Int(d.recent_shortfall_min)) min short" : ""))
             }
         }
@@ -1841,8 +1840,8 @@ struct ActivityReport: View {
 
         HStack(alignment: .top, spacing: 0) {
             Readout(value: steps.value, caption: steps.unit)
-            Readout(value: st.map { "\(Int($0.active_kcal ?? 0))" } ?? "–", caption: "active kcal")
-            Readout(value: st.map { "\(Int($0.total_kcal ?? 0))" } ?? "–", caption: "total kcal")
+            Readout(value: st.map { Fmt.count($0.active_kcal ?? 0) } ?? "–", caption: "active kcal")
+            Readout(value: st.map { Fmt.count($0.total_kcal ?? 0) } ?? "–", caption: "total kcal")
             if let d = st?.distance_m { Readout(value: String(format: "%.1f", d / 1000), caption: "distance · km") }
         }
 
@@ -1855,8 +1854,8 @@ struct ActivityReport: View {
         let peak = prof.max() ?? 0
         let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
         LazyVGrid(columns: cols, alignment: .leading, spacing: 18) {
-            Readout(value: "\(Int(activeMin)) min", caption: "active")
-            Readout(value: "\(Int(lightMin)) min", caption: "lightly active")
+            Readout(value: Fmt.duration(minutes: activeMin), caption: "active")
+            Readout(value: Fmt.duration(minutes: lightMin), caption: "lightly active")
             Readout(value: String(format: "%.1f MET", peak), caption: "peak intensity")
         }
 
@@ -1875,9 +1874,7 @@ struct ActivityReport: View {
 }
 
 private func compactSteps(_ steps: Double?) -> (value: String, unit: String) {
-    guard let steps else { return ("–", "steps") }
-    guard steps >= 1_000 else { return ("\(Int(steps.rounded()))", "steps") }
-    return (String(format: "%.1f", steps / 1_000), "k steps")
+    (Fmt.count(steps), "steps")
 }
 
 // MET-above-rest across the human waking day, rather than a calendar-day 00–24

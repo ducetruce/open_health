@@ -49,7 +49,11 @@ enum HourlyHR {
         guard let data = json.data(using: .utf8),
               let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return Result(error: "unreadable response") }
-        if let err = root["error"] as? String { return Result(error: err) }
+        if let err = root["error"] as? String {
+            // No ring database yet (nothing synced) is not an error worth showing.
+            if err.contains("opening DB") { return Result() }
+            return Result(error: err)
+        }
 
         let bars = (root["hours"] as? [[String: Any]] ?? []).compactMap { row -> Bar? in
             guard let unix = (row["unix"] as? NSNumber)?.doubleValue,
@@ -146,7 +150,7 @@ struct HourlyHeartRateSection: View {
                         .font(Obs.mono(30, .medium)).foregroundStyle(Obs.ink).monospacedDigit()
                     Text("bpm").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                 }
-                Text("\(Self.dayLabel(bar)) · \(String(format: "%02d:00", bar.hour)) · median \(Int(bar.median.rounded())) · range \(Int(bar.min.rounded()))–\(Int(bar.max.rounded())) · \(bar.count) beats")
+                Text("\(Self.dayLabel(bar)) · \(String(format: "%02d:00", bar.hour)) · Median \(Int(bar.median.rounded())) · Range \(Int(bar.min.rounded()))–\(Int(bar.max.rounded())) · \(bar.count) beats")
                     .font(Obs.mono(10)).foregroundStyle(Obs.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -156,7 +160,7 @@ struct HourlyHeartRateSection: View {
                     Text("\(Int(latest.bpm.rounded()))")
                         .font(Obs.mono(30, .medium)).foregroundStyle(Obs.ink).monospacedDigit()
                     Text("bpm").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
-                    Text("latest").font(Obs.mono(10)).foregroundStyle(Obs.muted)
+                    Text("Latest").font(Obs.mono(10)).foregroundStyle(Obs.muted)
                 }
                 Text(Self.stamp(latest.unix)).font(Obs.mono(10)).foregroundStyle(Obs.muted)
             }
@@ -170,7 +174,7 @@ struct HourlyHeartRateSection: View {
                     .font(Obs.mono(9)).foregroundStyle(Obs.ink2)
             }
             Spacer()
-            Text("touch a bar for that hour").font(Obs.mono(9)).foregroundStyle(Obs.muted)
+            Text("Touch a bar for that hour").font(Obs.mono(9)).foregroundStyle(Obs.muted)
             Spacer()
             if let last = visible.last {
                 Text(Self.dayLabel(last) + " " + String(format: "%02d:00", last.hour))
@@ -184,10 +188,10 @@ struct HourlyHeartRateSection: View {
         let beats = visible.reduce(0) { $0 + $1.count }
         let weighted = visible.reduce(0.0) { $0 + $1.median * Double($1.count) }
         return VStack(spacing: 10) {
-            if let lo = lows.min() { ObsStat(label: "quietest hour", value: "\(Int(lo.rounded())) bpm") }
-            if let hi = highs.max() { ObsStat(label: "busiest hour", value: "\(Int(hi.rounded())) bpm") }
-            if beats > 0 { ObsStat(label: "typical", value: "\(Int((weighted / Double(beats)).rounded())) bpm") }
-            ObsStat(label: "hours with data", value: "\(visible.count)/\(window.hours)")
+            if let lo = lows.min() { ObsStat(label: "Quietest hour", value: "\(Int(lo.rounded())) bpm") }
+            if let hi = highs.max() { ObsStat(label: "Busiest hour", value: "\(Int(hi.rounded())) bpm") }
+            if beats > 0 { ObsStat(label: "Typical", value: "\(Int((weighted / Double(beats)).rounded())) bpm") }
+            ObsStat(label: "Hours with data", value: "\(visible.count)/\(window.hours)")
         }
         .padding(.top, 2)
     }
