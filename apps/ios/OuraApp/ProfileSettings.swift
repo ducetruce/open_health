@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import UniformTypeIdentifiers
 
 private struct EditableProfile {
     var sex: String
@@ -99,11 +100,50 @@ struct ProfileSettingsView: View {
     @State private var message: String?
     @ObservedObject private var health = HealthExport.shared
     @ObservedObject private var units = UnitSettings.shared
+    @State private var ouraImport: OuraImportInfo?
+    @State private var choosingExport = false
+    @State private var importStatus: String?
+    @State private var importingExport = false
     let onSaved: () -> Void
 
-    init(profile: Profile?, onSaved: @escaping () -> Void) {
+    init(profile: Profile?, ouraImport: OuraImportInfo? = nil, onSaved: @escaping () -> Void) {
         _profile = State(initialValue: EditableProfile(profile))
+        _ouraImport = State(initialValue: ouraImport)
         self.onSaved = onSaved
+    }
+
+    private func importExport(_ url: URL) {
+        importingExport = true
+        importStatus = nil
+        Task.detached(priority: .userInitiated) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let text = (try? String(contentsOf: url, encoding: .utf8))
+                ?? (try? String(contentsOf: url, encoding: .isoLatin1))
+            let json = text.map { importOuraExport(dbPath: DB.url.path, csvText: $0) }
+            let object = json.flatMap { $0.data(using: .utf8) }
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            await MainActor.run {
+                importingExport = false
+                guard let object else {
+                    importStatus = "Couldn't read that file."
+                    return
+                }
+                if let error = object["error"] as? String {
+                    importStatus = "Not imported: \(error)"
+                    return
+                }
+                let calibrated = object["calibrated"] as? [String: Any]
+                let info = OuraImportInfo(
+                    days: object["days"] as? Int, first: object["first"] as? String,
+                    last: object["last"] as? String,
+                    calibrated: .init(sleep: calibrated?["sleep"] as? Bool,
+                                      readiness: calibrated?["readiness"] as? Bool))
+                ouraImport = info
+                importStatus = "Imported \(info.days ?? 0) days."
+                onSaved()
+            }
+        }
     }
 
     var body: some View {
@@ -173,6 +213,44 @@ struct ProfileSettingsView: View {
                 }
 
                 Section {
+                    if let info = ouraImport {
+                        LabeledContent("Days imported", value: "\(info.days ?? 0)")
+                        LabeledContent("Covers", value: "\(Fmt.day(info.first)) – \(Fmt.day(info.last))")
+                        LabeledContent("Scores calibrated", value: calibrationText(info))
+                    }
+                    Button {
+                        choosingExport = true
+                    } label: {
+                        HStack {
+                            Label(ouraImport == nil ? "Import Oura export" : "Replace with a newer export",
+                                  systemImage: "square.and.arrow.down")
+                            Spacer()
+                            if importingExport { ProgressView() }
+                        }
+                    }
+                    .disabled(importingExport)
+                    if ouraImport != nil {
+                        Button("Remove imported data", role: .destructive) {
+                            _ = clearOuraExport(dbPath: DB.url.path)
+                            ouraImport = nil
+                            importStatus = nil
+                            onSaved()
+                        }
+                    }
+                    if let importStatus {
+                        Text(importStatus).font(.footnote).foregroundStyle(Obs.ink2)
+                    }
+                } header: {
+                    Text("Oura history")
+                } footer: {
+                    Text("Import the trends CSV from your Oura account to fit Readiness and Sleep to Oura's own scale and to see your history from before this app. It stays on this iPhone.")
+                }
+                .fileImporter(isPresented: $choosingExport,
+                              allowedContentTypes: [.commaSeparatedText, .plainText, .text, .data]) { result in
+                    if case .success(let url) = result { importExport(url) }
+                }
+
+                Section {
                     Toggle("Write ring data to Apple Health", isOn: Binding(
                         get: { health.enabled },
                         set: { health.setEnabled($0, summary: SummaryCache.load()) }
@@ -209,5 +287,14 @@ struct ProfileSettingsView: View {
                 }
             }
         }
+    }
+}
+
+private func calibrationText(_ info: OuraImportInfo) -> String {
+    switch (info.calibrated?.sleep == true, info.calibrated?.readiness == true) {
+    case (true, true): return "Sleep & Readiness"
+    case (true, false): return "Sleep"
+    case (false, true): return "Readiness"
+    default: return "Not enough data"
     }
 }

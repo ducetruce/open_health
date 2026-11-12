@@ -129,6 +129,19 @@ summary = {
     },
     "activity_profile": profile,
     "activity_daily": daily,
+    # A year of earlier history, as an imported Oura export would provide.
+    "imported_history": {
+        ymd(today - timedelta(days=k)): {
+            "sleep_score": 70 + (k * 7) % 20, "readiness": 68 + (k * 5) % 24,
+            "asleep_s": 24_000 + (k * 311) % 6_000, "rhr": 52 + (k % 6),
+            "hrv_ms": 42 + (k * 3) % 20, "breath_rate": 14.2 + (k % 5) / 10,
+            "steps": 6_000 + (k * 137) % 6_000, "active_kcal": 250 + (k * 13) % 250,
+        }
+        for k in range(100, 465)
+    },
+    "oura_import": {"days": 365, "first": ymd(today - timedelta(days=464)),
+                    "last": ymd(today - timedelta(days=100)),
+                    "calibrated": {"sleep": True, "readiness": True}},
     "profile": {"sex": "F", "age": 34, "height_m": 1.68, "weight_kg": 62},
     "fitness": {"vo2max": 41.3},
     "sleep_debt": {"debt_min": 95, "recent_shortfall_min": 40, "valid": True, "need_h": 8,

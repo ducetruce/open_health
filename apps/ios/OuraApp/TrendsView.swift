@@ -106,11 +106,37 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         }
     }
 
-    /// One value per local day, oldest first.
+    /// One value per local day, oldest first: ring data, plus days from an imported
+    /// Oura export that the ring data doesn't cover.
     func daily(in s: Summary) -> [DatedVital] {
+        let ring = ringDaily(in: s)
+        guard !s.imported_history.isEmpty else { return ring }
+        let covered = Set(ring.map(\.date))
+        let imported: [DatedVital] = s.imported_history.compactMap { day, entry in
+            guard !covered.contains(day), let v = importedValue(entry) else { return nil }
+            return DatedVital(date: day, value: v)
+        }
+        return (ring + imported).sorted { $0.date < $1.date }
+    }
+
+    private func importedValue(_ d: ImportedDay) -> Double? {
+        switch self {
+        case .readiness: return d.readiness
+        case .sleepScore: return d.sleep_score
+        case .asleep: return d.asleep_s
+        case .restingHR: return d.rhr
+        case .hrv: return d.hrv_ms
+        case .breathing: return d.breath_rate
+        case .steps: return d.steps
+        case .activeKcal: return d.active_kcal
+        case .temperature, .oxygen: return nil  // the export has a deviation, not a level
+        }
+    }
+
+    private func ringDaily(in s: Summary) -> [DatedVital] {
         switch self {
         case .readiness: return s.nightlySeries { $0.readiness?.score }
-        case .sleepScore: return s.nightlySeries { $0.sleep_score?.score }
+        case .sleepScore: return s.nightlySeries { $0.mainSleepScore?.score }
         case .asleep:
             // Time asleep = time in bed × the share of it the hypnogram scored as sleep.
             return s.nightlySeries { n in n.efficiency.map { n.durationS * $0 / 100 } }

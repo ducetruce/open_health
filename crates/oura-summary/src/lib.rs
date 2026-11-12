@@ -13,6 +13,7 @@
 //! `docs/clients-web-and-ios.md`.
 
 pub mod hourly_hr;
+pub mod oura_export;
 pub mod readiness;
 pub mod research_export;
 pub mod ring_time;
@@ -2485,6 +2486,19 @@ pub fn build_summary(
     let mut prior_main_ends: Vec<f64> = Vec::new();
     let mut prior_main_temp: Vec<(f64, f64)> = Vec::new();
     let mut prior_main_asleep: Vec<(f64, f64)> = Vec::new();
+    let mut prior_main_avg_hr: Vec<(f64, f64)> = Vec::new();
+    let mut prior_main_mid_hours: Vec<f64> = Vec::new();
+    // An imported Oura export: daily history, and (when it had enough days) a
+    // calibration that scores nights on Oura's own scale. See `oura_export`.
+    let oura_import = oura_export::load(db);
+    let calibration = oura_import
+        .as_ref()
+        .map(|v| v["params"].clone())
+        .filter(|p| p["contributors"].as_object().is_some_and(|c| !c.is_empty()));
+    // Calibrated readiness needs the day's activity, which is computed after the
+    // nights: (index in nights_json, wake day, drivers, provisional) to finish later.
+    let mut pending_readiness: Vec<(usize, i64, std::collections::HashMap<&'static str, f64>, bool)> =
+        Vec::new();
     for nt in &nights {
         let hyp = hyps.get(&(nt.start_ds, nt.captured_unix));
         let raw_stages: Vec<i64> = hyp
@@ -2733,9 +2747,69 @@ pub fn build_summary(
         } else {
             Value::Null
         };
+        let mid_hour = ((start_unix + end_unix) / 2.0 + offset_seconds(tz) as f64).rem_euclid(86_400.0) / 3600.0;
+        let night_avg_hr = mean(&nt.hr);
+        if let (Some(params), true) = (calibration.as_ref(), is_main_sleep) {
+            let trailing = |v: &[(f64, f64)]| -> Option<f64> {
+                let values: Vec<f64> = v.iter().rev().filter(|&&(end, _)| end <= start_unix)
+                    .take(14).map(|&(_, x)| x).collect();
+                mean(&values)
+            };
+            let mut oura_sleep: Option<f64> = None;
+            if complete_staging && asleep_s > 0 {
+                let pct = |v: &Value| v.as_f64().unwrap_or(0.0) / 100.0;
+                let wrapped = oura_export::wrapped_hour(mid_hour);
+                let previous: Vec<f64> = prior_main_mid_hours.iter().rev().take(7).copied().collect();
+                let regularity = oura_export::clock_mean(&previous)
+                    .map(|usual| oura_export::clock_distance(mid_hour, usual))
+                    .unwrap_or(0.0);
+                let mut m = std::collections::HashMap::new();
+                m.insert("Total Sleep Duration", asleep_s as f64);
+                if let Some(e) = hyp.and_then(|h| h["efficiency_pct"].as_f64()) {
+                    m.insert("Sleep Efficiency", e);
+                }
+                m.insert("REM Sleep Duration", pct(&rem_pct_val) * in_bed_s);
+                m.insert("Deep Sleep Duration", pct(&deep_pct_val) * in_bed_s);
+                if let Some(sol) = metrics["sol_min"].as_f64() {
+                    m.insert("Sleep Latency", sol * 60.0);
+                }
+                m.insert("awake_frac", pct(&wake_pct_val));
+                m.insert("mid_hour", wrapped);
+                m.insert("mid_opt", -((wrapped - 27.0).powi(2)));
+                m.insert("mid_reg", regularity);
+                let scored = oura_export::score(params, oura_export::SLEEP, &m, false);
+                oura_sleep = scored["score"].as_f64();
+                night_json["oura_sleep_score"] = scored;
+            }
+            // Same inputs and cold-baseline fallbacks as tools/score_readiness.py.
+            let hrv = raw_mean_hrv.unwrap_or(60.0);
+            let avg_hr = night_avg_hr.unwrap_or(58.0);
+            let total_sleep = night_asleep.unwrap_or(27_000.0);
+            let temp_deviation = match (night_temp, trailing(&prior_main_temp)) {
+                (Some(t), Some(usual)) => t - usual,
+                _ => 0.0,
+            };
+            let mut m = std::collections::HashMap::new();
+            m.insert("Sleep Score", oura_sleep.unwrap_or(70.0));
+            m.insert("Average HRV", hrv);
+            m.insert("trail14_Average HRV", trailing(&prior_main_hrv).unwrap_or(hrv));
+            m.insert("Lowest Resting Heart Rate", raw_lowest_hr.unwrap_or(55.0));
+            m.insert("Average Resting Heart Rate", avg_hr);
+            m.insert("trail14_Average Resting Heart Rate", trailing(&prior_main_avg_hr).unwrap_or(avg_hr));
+            m.insert("Temperature Deviation (°C)", temp_deviation);
+            m.insert("Total Sleep Duration", total_sleep);
+            m.insert("trail14_Total Sleep Duration", trailing(&prior_main_asleep).unwrap_or(total_sleep));
+            let wake_day = (end_unix as i64 + offset_seconds(tz)).div_euclid(86_400);
+            let history = prior_main_ends.iter().filter(|&&end| end <= start_unix).count();
+            pending_readiness.push((nights_json.len(), wake_day, m, history < readiness::MATURE_NIGHTS));
+        }
         nights_json.push(night_json);
         if is_main_sleep {
             prior_main_ends.push(end_unix);
+            prior_main_mid_hours.push(mid_hour);
+            if let Some(avg) = night_avg_hr {
+                prior_main_avg_hr.push((end_unix, avg));
+            }
             if let Some(lowest) = raw_lowest_hr {
                 prior_main_rhr.push((end_unix, lowest));
             }
@@ -2761,6 +2835,7 @@ pub fn build_summary(
             ));
         }
     }
+    let nights_count = nights_json.len();
     nights_json.reverse();
 
     asleep_by_day.retain(|day, _| !incomplete_sleep_days.contains(day));
@@ -2899,6 +2974,31 @@ pub fn build_summary(
         })
         .collect::<serde_json::Map<_, _>>()
         .into();
+
+    // Finish the calibrated readiness scores now that daily activity is known:
+    // average MET per day = rest (1) + the mean MET above rest of its measured buckets.
+    if let Some(params) = calibration.as_ref() {
+        let met_by_day: std::collections::BTreeMap<i64, f64> = prof_sum
+            .iter()
+            .filter_map(|(k, sums)| {
+                let cnt = &prof_cnt[k];
+                let measured: Vec<f64> = sums.iter().zip(cnt.iter())
+                    .filter(|(_, c)| **c > 0).map(|(s, c)| s / *c as f64).collect();
+                let (y, m, d) = (k.get(0..4)?.parse().ok()?, k.get(5..7)?.parse().ok()?, k.get(8..10)?.parse().ok()?);
+                mean(&measured).map(|above| (days_from_civil(y, m, d), 1.0 + above))
+            })
+            .collect();
+        for (index, wake_day, mut m, provisional) in pending_readiness {
+            let previous = met_by_day.get(&(wake_day - 1)).or_else(|| met_by_day.get(&wake_day)).copied().unwrap_or(1.4);
+            let history: Vec<f64> = met_by_day.range(wake_day - 14..wake_day).map(|(_, v)| *v).collect();
+            m.insert("prev_Average MET", previous);
+            m.insert("trail14_Average MET", mean(&history).unwrap_or(previous));
+            let scored = oura_export::score(params, oura_export::READINESS, &m, provisional);
+            if !scored.is_null() {
+                nights_json[nights_count - 1 - index]["readiness"] = scored;
+            }
+        }
+    }
 
     let hrv_by_night: Vec<Option<f64>> = nights.iter().map(|n| mean(&n.rmssd)).collect();
     let rhr_by_night: Vec<Option<f64>> = nights
@@ -3172,6 +3272,12 @@ pub fn build_summary(
         "fitness": { "vo2max": (vo2max * 10.0).round() / 10.0 },
         "activity": activity,
         "activity_profile": activity_profile,
+        // Daily values from an imported Oura export, keyed by date (may predate the ring
+        // data), and what the import covered.
+        "imported_history": oura_import.as_ref().map(|v| v["history"].clone()).unwrap_or(Value::Null),
+        "oura_import": oura_import.as_ref().map(|v| json!({
+            "days": v["days"], "first": v["first"], "last": v["last"], "calibrated": v["calibrated"],
+        })).unwrap_or(Value::Null),
         "activity_daily": activity_daily,
         "vitals": {
             "hrv": trend(&hrv_stat),
@@ -4034,6 +4140,22 @@ mod tests {
             );
         }
 
+        // An imported Oura export switches the scores to Oura's calibrated scale and
+        // brings its daily history along.
+        oura_export::import(&db, &oura_export::tests::synthetic_export(120)).unwrap();
+        let calibrated = build_summary(&db, 0.0, &FakeRunner).unwrap();
+        let latest = &calibrated["nights"][0];
+        assert_eq!(latest["oura_sleep_score"]["basis"], "oura-calibrated", "{latest}");
+        assert!(latest["oura_sleep_score"]["score"].as_f64().is_some());
+        assert_eq!(latest["readiness"]["basis"], "oura-calibrated");
+        assert_eq!(latest["readiness"]["components"].as_array().unwrap().len(), 8);
+        // The published-norms sleep score is still reported alongside.
+        assert_eq!(latest["sleep_score"], nights_after[0]["sleep_score"]);
+        assert_eq!(calibrated["oura_import"]["days"], 120);
+        assert_eq!(calibrated["imported_history"]["2025-01-01"]["steps"], 6000.0);
+        // A nap gets neither calibrated score.
+        assert!(calibrated["nights"].as_array().unwrap().iter()
+            .filter(|n| n["oura_sleep_score"].is_object()).count() >= 4);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

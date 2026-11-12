@@ -1635,9 +1635,13 @@ struct SleepReport: View {
                 bedtimeEditor(n)
             }
 
-            if let score = n.sleep_score {
-                Rule("sleep score")
+            if let score = n.oura_sleep_score {
+                Rule("sleep score · Oura scale")
                 SleepScoreCard(score: score, breathRate: n.breath_rate)
+            }
+            if let score = n.sleep_score {
+                Rule(n.oura_sleep_score == nil ? "sleep score" : "sleep score · sleep norms")
+                SleepScoreCard(score: score, breathRate: n.oura_sleep_score == nil ? n.breath_rate : nil)
             }
 
             if n.hasHypnogram {

@@ -8,11 +8,11 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(oura_coreFFI)
-    import oura_coreFFI
+import oura_coreFFI
 #endif
 
-private extension RustBuffer {
-    /// Allocate a new buffer, copying the contents of a `UInt8` array.
+fileprivate extension RustBuffer {
+    // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
             RustBuffer.from(ptr)
@@ -21,21 +21,21 @@ private extension RustBuffer {
     }
 
     static func empty() -> RustBuffer {
-        RustBuffer(capacity: 0, len: 0, data: nil)
+        RustBuffer(capacity: 0, len:0, data: nil)
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
         try! rustCall { ffi_oura_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
-    /// Frees the buffer in place.
-    /// The buffer must not be used after this is called.
+    // Frees the buffer in place.
+    // The buffer must not be used after this is called.
     func deallocate() {
         try! rustCall { ffi_oura_core_rustbuffer_free(self, $0) }
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
@@ -48,7 +48,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a library of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         self.init(
             bytesNoCopy: rustBuffer.data!,
@@ -72,15 +72,15 @@ private extension Data {
 //
 // Instead, the read() method and these helper functions input a tuple of data
 
-private func createReader(data: Data) -> (data: Data, offset: Data.Index) {
+fileprivate func createReader(data: Data) -> (data: Data, offset: Data.Index) {
     (data: data, offset: 0)
 }
 
-/// Reads an integer at the current offset, in big-endian order, and advances
-/// the offset on success. Throws if reading the integer would move the
-/// offset past the end of the buffer.
-private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
-    let range = reader.offset ..< reader.offset + MemoryLayout<T>.size
+// Reads an integer at the current offset, in big-endian order, and advances
+// the offset on success. Throws if reading the integer would move the
+// offset past the end of the buffer.
+fileprivate func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: Data.Index)) throws -> T {
+    let range = reader.offset..<reader.offset + MemoryLayout<T>.size
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
@@ -90,38 +90,38 @@ private func readInt<T: FixedWidthInteger>(_ reader: inout (data: Data, offset: 
         return value as! T
     }
     var value: T = 0
-    let _ = withUnsafeMutableBytes(of: &value) { reader.data.copyBytes(to: $0, from: range) }
+    let _ = withUnsafeMutableBytes(of: &value, { reader.data.copyBytes(to: $0, from: range)})
     reader.offset = range.upperBound
     return value.bigEndian
 }
 
-/// Reads an arbitrary number of bytes, to be used to read
-/// raw bytes, this is useful when lifting strings
-private func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> [UInt8] {
-    let range = reader.offset ..< (reader.offset + count)
+// Reads an arbitrary number of bytes, to be used to read
+// raw bytes, this is useful when lifting strings
+fileprivate func readBytes(_ reader: inout (data: Data, offset: Data.Index), count: Int) throws -> Array<UInt8> {
+    let range = reader.offset..<(reader.offset+count)
     guard reader.data.count >= range.upperBound else {
         throw UniffiInternalError.bufferOverflow
     }
     var value = [UInt8](repeating: 0, count: count)
-    value.withUnsafeMutableBufferPointer { buffer in
+    value.withUnsafeMutableBufferPointer({ buffer in
         reader.data.copyBytes(to: buffer, from: range)
-    }
+    })
     reader.offset = range.upperBound
     return value
 }
 
-/// Reads a float at the current offset.
-private func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
-    return try Float(bitPattern: readInt(&reader))
+// Reads a float at the current offset.
+fileprivate func readFloat(_ reader: inout (data: Data, offset: Data.Index)) throws -> Float {
+    return Float(bitPattern: try readInt(&reader))
 }
 
-/// Reads a float at the current offset.
-private func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
-    return try Double(bitPattern: readInt(&reader))
+// Reads a float at the current offset.
+fileprivate func readDouble(_ reader: inout (data: Data, offset: Data.Index)) throws -> Double {
+    return Double(bitPattern: try readInt(&reader))
 }
 
-/// Indicates if the offset has reached the end of the buffer.
-private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
+// Indicates if the offset has reached the end of the buffer.
+fileprivate func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
     return reader.offset < reader.data.count
 }
 
@@ -129,34 +129,34 @@ private func hasRemaining(_ reader: (data: Data, offset: Data.Index)) -> Bool {
 // struct, but we use standalone functions instead in order to make external
 // types work.  See the above discussion on Readers for details.
 
-private func createWriter() -> [UInt8] {
+fileprivate func createWriter() -> [UInt8] {
     return []
 }
 
-private func writeBytes<S: Sequence>(_ writer: inout [UInt8], _ byteArr: S) where S.Element == UInt8 {
+fileprivate func writeBytes<S>(_ writer: inout [UInt8], _ byteArr: S) where S: Sequence, S.Element == UInt8 {
     writer.append(contentsOf: byteArr)
 }
 
-/// Writes an integer in big-endian order.
-///
-/// Warning: make sure what you are trying to write
-/// is in the correct type!
-private func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
+// Writes an integer in big-endian order.
+//
+// Warning: make sure what you are trying to write
+// is in the correct type!
+fileprivate func writeInt<T: FixedWidthInteger>(_ writer: inout [UInt8], _ value: T) {
     var value = value.bigEndian
     withUnsafeBytes(of: &value) { writer.append(contentsOf: $0) }
 }
 
-private func writeFloat(_ writer: inout [UInt8], _ value: Float) {
+fileprivate func writeFloat(_ writer: inout [UInt8], _ value: Float) {
     writeInt(&writer, value.bitPattern)
 }
 
-private func writeDouble(_ writer: inout [UInt8], _ value: Double) {
+fileprivate func writeDouble(_ writer: inout [UInt8], _ value: Double) {
     writeInt(&writer, value.bitPattern)
 }
 
-/// Protocol for types that transfer other types across the FFI. This is
-/// analogous to the Rust trait of the same name.
-private protocol FfiConverter {
+// Protocol for types that transfer other types across the FFI. This is
+// analogous to the Rust trait of the same name.
+fileprivate protocol FfiConverter {
     associatedtype FfiType
     associatedtype SwiftType
 
@@ -166,33 +166,33 @@ private protocol FfiConverter {
     static func write(_ value: SwiftType, into buf: inout [UInt8])
 }
 
-/// Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType {}
+// Types conforming to `Primitive` pass themselves directly over the FFI.
+fileprivate protocol FfiConverterPrimitive: FfiConverter where FfiType == SwiftType { }
 
 extension FfiConverterPrimitive {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ value: FfiType) throws -> SwiftType {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> FfiType {
         return value
     }
 }
 
-/// Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
-/// Used for complex types where it's hard to write a custom lift/lower.
-private protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
+// Types conforming to `FfiConverterRustBuffer` lift and lower into a `RustBuffer`.
+// Used for complex types where it's hard to write a custom lift/lower.
+fileprivate protocol FfiConverterRustBuffer: FfiConverter where FfiType == RustBuffer {}
 
 extension FfiConverterRustBuffer {
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ buf: RustBuffer) throws -> SwiftType {
         var reader = createReader(data: Data(rustBuffer: buf))
         let value = try read(from: &reader)
@@ -203,19 +203,18 @@ extension FfiConverterRustBuffer {
         return value
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ value: SwiftType) -> RustBuffer {
-        var writer = createWriter()
-        write(value, into: &writer)
-        return RustBuffer(bytes: writer)
+          var writer = createWriter()
+          write(value, into: &writer)
+          return RustBuffer(bytes: writer)
     }
 }
-
-/// An error type for FFI errors. These errors occur at the UniFFI level, not
-/// the library level.
-private enum UniffiInternalError: LocalizedError {
+// An error type for FFI errors. These errors occur at the UniFFI level, not
+// the library level.
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -226,7 +225,7 @@ private enum UniffiInternalError: LocalizedError {
     case unexpectedStaleHandle
     case rustPanic(_ message: String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .bufferOverflow: return "Reading the requested value would read past the end of the buffer"
         case .incompleteData: return "The buffer still has data after lifting its containing value"
@@ -241,24 +240,24 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private extension NSLock {
+fileprivate extension NSLock {
     func withLock<T>(f: () throws -> T) rethrows -> T {
-        lock()
+        self.lock()
         defer { self.unlock() }
         return try f()
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_UNEXPECTED_ERROR: Int8 = 2
-private let CALL_CANCELLED: Int8 = 3
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_UNEXPECTED_ERROR: Int8 = 2
+fileprivate let CALL_CANCELLED: Int8 = 3
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -274,8 +273,7 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
 
 private func rustCallWithError<T, E: Swift.Error>(
     _ errorHandler: @escaping (RustBuffer) throws -> E,
-    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
-) throws -> T {
+    _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: errorHandler)
 }
 
@@ -284,7 +282,7 @@ private func makeRustCall<T, E: Swift.Error>(
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
     uniffiEnsureInitialized()
-    var callStatus = RustCallStatus()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
     return returnedVal
@@ -295,44 +293,44 @@ private func uniffiCheckCallStatus<E: Swift.Error>(
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws {
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return
+        case CALL_SUCCESS:
+            return
 
-    case CALL_ERROR:
-        if let errorHandler = errorHandler {
-            throw try errorHandler(callStatus.errorBuf)
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.unexpectedRustCallError
-        }
+        case CALL_ERROR:
+            if let errorHandler = errorHandler {
+                throw try errorHandler(callStatus.errorBuf)
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.unexpectedRustCallError
+            }
 
-    case CALL_UNEXPECTED_ERROR:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw try UniffiInternalError.rustPanic(FfiConverterString.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_UNEXPECTED_ERROR:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try FfiConverterString.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    case CALL_CANCELLED:
-        fatalError("Cancellation not supported yet")
+        case CALL_CANCELLED:
+            fatalError("Cancellation not supported yet")
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
 
 private func uniffiTraitInterfaceCall<T>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void
+    writeReturn: (T) -> ()
 ) {
     do {
         try writeReturn(makeCall())
-    } catch {
+    } catch let error {
         callStatus.pointee.code = CALL_UNEXPECTED_ERROR
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
@@ -341,7 +339,7 @@ private func uniffiTraitInterfaceCall<T>(
 private func uniffiTraitInterfaceCallWithError<T, E>(
     callStatus: UnsafeMutablePointer<RustCallStatus>,
     makeCall: () throws -> T,
-    writeReturn: (T) -> Void,
+    writeReturn: (T) -> (),
     lowerError: (E) -> RustBuffer
 ) {
     do {
@@ -354,8 +352,7 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-
-private class UniffiHandleMap<T> {
+fileprivate class UniffiHandleMap<T> {
     private var map: [UInt64: T] = [:]
     private let lock = NSLock()
     private var currentHandle: UInt64 = 1
@@ -369,7 +366,7 @@ private class UniffiHandleMap<T> {
         }
     }
 
-    func get(handle: UInt64) throws -> T {
+     func get(handle: UInt64) throws -> T {
         try lock.withLock {
             guard let obj = map[handle] else {
                 throw UniffiInternalError.unexpectedStaleHandle
@@ -389,140 +386,144 @@ private class UniffiHandleMap<T> {
     }
 
     var count: Int {
-        map.count
+        get {
+            map.count
+        }
     }
 }
+
 
 // Public interface members begin here.
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt16: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
     typealias FfiType = UInt16
     typealias SwiftType = UInt16
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt32: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterInt32: FfiConverterPrimitive {
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
     typealias FfiType = Int32
     typealias SwiftType = Int32
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Int32, into buf: inout [UInt8]) {
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterUInt64: FfiConverterPrimitive {
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterInt64: FfiConverterPrimitive {
+fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
     typealias FfiType = Int64
     typealias SwiftType = Int64
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Int64, into buf: inout [UInt8]) {
+    public static func write(_ value: Int64, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterDouble: FfiConverterPrimitive {
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
     typealias FfiType = Double
     typealias SwiftType = Double
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
         return try lift(readDouble(&buf))
     }
 
-    static func write(_ value: Double, into buf: inout [UInt8]) {
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
         writeDouble(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterBool: FfiConverter {
+fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
 
-    static func lift(_ value: Int8) throws -> Bool {
+    public static func lift(_ value: Int8) throws -> Bool {
         return value != 0
     }
 
-    static func lower(_ value: Bool) -> Int8 {
+    public static func lower(_ value: Bool) -> Int8 {
         return value ? 1 : 0
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bool {
         return try lift(readInt(&buf))
     }
 
-    static func write(_ value: Bool, into buf: inout [UInt8]) {
+    public static func write(_ value: Bool, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterString: FfiConverter {
+fileprivate struct FfiConverterString: FfiConverter {
     typealias SwiftType = String
     typealias FfiType = RustBuffer
 
-    static func lift(_ value: RustBuffer) throws -> String {
+    public static func lift(_ value: RustBuffer) throws -> String {
         defer {
             value.deallocate()
         }
@@ -533,7 +534,7 @@ private struct FfiConverterString: FfiConverter {
         return String(bytes: bytes, encoding: String.Encoding.utf8)!
     }
 
-    static func lower(_ value: String) -> RustBuffer {
+    public static func lower(_ value: String) -> RustBuffer {
         return value.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
@@ -544,12 +545,12 @@ private struct FfiConverterString: FfiConverter {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return try String(bytes: readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
     }
 
-    static func write(_ value: String, into buf: inout [UInt8]) {
+    public static func write(_ value: String, into buf: inout [UInt8]) {
         let len = Int32(value.utf8.count)
         writeInt(&buf, len)
         writeBytes(&buf, value.utf8)
@@ -557,33 +558,37 @@ private struct FfiConverterString: FfiConverter {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterData: FfiConverterRustBuffer {
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
     typealias SwiftType = Data
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
         let len: Int32 = try readInt(&buf)
-        return try Data(readBytes(&buf, count: Int(len)))
+        return Data(try readBytes(&buf, count: Int(len)))
     }
 
-    static func write(_ value: Data, into buf: inout [UInt8]) {
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         writeBytes(&buf, value)
     }
 }
 
+
+
+
 /**
  * A live sync session bound to a connected ring: Swift creates it with a writer,
  * feeds inbound BLE frames via `push_frame`, then awaits `sync`.
  */
-public protocol RingSessionProtocol: AnyObject {
+public protocol RingSessionProtocol : AnyObject {
+    
     /**
      * Interrupts even an idle Rust receive; a finished Swift AsyncStream cannot do this.
      */
-    func cancel(reason: String)
-
+    func cancel(reason: String) 
+    
     /**
      * **DESTRUCTIVE.** Wipe the ring back to factory state: the installed auth key,
      * every BLE bond, the on-ring event buffer and the anthropometric profile are
@@ -598,8 +603,8 @@ public protocol RingSessionProtocol: AnyObject {
      * new key — and its event counter keeps running, so start a fresh database
      * rather than resuming the old cursor.
      */
-    func factoryReset(keyHex: String, confirmSerial: String) async throws -> String
-
+    func factoryReset(keyHex: String, confirmSerial: String) async throws  -> String
+    
     /**
      * Pair with a **factory-reset** ring: install a 16-byte app-auth key over the
      * already-connected link and verify it authenticates. This is the on-device
@@ -613,13 +618,13 @@ public protocol RingSessionProtocol: AnyObject {
      * Only valid on a reset ring: one that still holds a key answers `set_auth_key`
      * with a non-zero status and the call fails without changing anything.
      */
-    func pair(existingKeyHex: String?) async throws -> PairReport
-
+    func pair(existingKeyHex: String?) async throws  -> PairReport
+    
     /**
      * Swift pushes each inbound BLE notification frame here.
      */
-    func pushFrame(data: Data)
-
+    func pushFrame(data: Data) 
+    
     /**
      * Authenticate, set up the app stream, and drain history events into the DB at
      * `db_path`. `key_hex` is the 32-char ring auth key. `progress` receives stage
@@ -628,7 +633,8 @@ public protocol RingSessionProtocol: AnyObject {
      * The drain checkpoints its cursor after every batch, so a failed call can be
      * retried (reconnect + call again) and resumes where it left off.
      */
-    func sync(dbPath: String, keyHex: String, progress: SyncProgressListener) async throws -> SyncReport
+    func sync(dbPath: String, keyHex: String, progress: SyncProgressListener) async throws  -> SyncReport
+    
 }
 
 /**
@@ -636,14 +642,13 @@ public protocol RingSessionProtocol: AnyObject {
  * feeds inbound BLE frames via `push_frame`, then awaits `sync`.
  */
 open class RingSession:
-    RingSessionProtocol
-{
+    RingSessionProtocol {
     fileprivate let pointer: UnsafeMutableRawPointer!
 
-    // Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public struct NoPointer {
         public init() {}
     }
@@ -651,7 +656,7 @@ open class RingSession:
     // TODO: We'd like this to be `private` but for Swifty reasons,
     // we can't implement `FfiConverter` without making this `required` and we can't
     // make it `required` without making it `public`.
-    public required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
         self.pointer = pointer
     }
 
@@ -660,29 +665,28 @@ open class RingSession:
     //
     // - Warning:
     //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
-    public init(noPointer _: NoPointer) {
-        pointer = nil
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public func uniffiClonePointer() -> UnsafeMutableRawPointer {
         return try! rustCall { uniffi_oura_core_fn_clone_ringsession(self.pointer, $0) }
     }
-
-    public convenience init(writer: BleWriter) {
-        let pointer =
-            try! rustCall {
-                uniffi_oura_core_fn_constructor_ringsession_new(
-                    FfiConverterCallbackInterfaceBleWriter.lower(writer), $0
-                )
-            }
-        self.init(unsafeFromRawPointer: pointer)
-    }
+public convenience init(writer: BleWriter) {
+    let pointer =
+        try! rustCall() {
+    uniffi_oura_core_fn_constructor_ringsession_new(
+        FfiConverterCallbackInterfaceBleWriter.lower(writer),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
 
     deinit {
         guard let pointer = pointer else {
@@ -692,16 +696,19 @@ open class RingSession:
         try! rustCall { uniffi_oura_core_fn_free_ringsession(pointer, $0) }
     }
 
+    
+
+    
     /**
      * Interrupts even an idle Rust receive; a finished Swift AsyncStream cannot do this.
      */
-    open func cancel(reason: String) {
-        try! rustCall {
-            uniffi_oura_core_fn_method_ringsession_cancel(self.uniffiClonePointer(),
-                                                          FfiConverterString.lower(reason), $0)
-        }
-    }
-
+open func cancel(reason: String) {try! rustCall() {
+    uniffi_oura_core_fn_method_ringsession_cancel(self.uniffiClonePointer(),
+        FfiConverterString.lower(reason),$0
+    )
+}
+}
+    
     /**
      * **DESTRUCTIVE.** Wipe the ring back to factory state: the installed auth key,
      * every BLE bond, the on-ring event buffer and the anthropometric profile are
@@ -716,23 +723,23 @@ open class RingSession:
      * new key — and its event counter keeps running, so start a fresh database
      * rather than resuming the old cursor.
      */
-    open func factoryReset(keyHex: String, confirmSerial: String) async throws -> String {
-        return
-            try await uniffiRustCallAsync(
-                rustFutureFunc: {
-                    uniffi_oura_core_fn_method_ringsession_factory_reset(
-                        self.uniffiClonePointer(),
-                        FfiConverterString.lower(keyHex), FfiConverterString.lower(confirmSerial)
-                    )
-                },
-                pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
-                completeFunc: ffi_oura_core_rust_future_complete_rust_buffer,
-                freeFunc: ffi_oura_core_rust_future_free_rust_buffer,
-                liftFunc: FfiConverterString.lift,
-                errorHandler: FfiConverterTypeSyncError.lift
-            )
-    }
-
+open func factoryReset(keyHex: String, confirmSerial: String)async throws  -> String {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_oura_core_fn_method_ringsession_factory_reset(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(keyHex),FfiConverterString.lower(confirmSerial)
+                )
+            },
+            pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_oura_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_oura_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterString.lift,
+            errorHandler: FfiConverterTypeSyncError.lift
+        )
+}
+    
     /**
      * Pair with a **factory-reset** ring: install a 16-byte app-auth key over the
      * already-connected link and verify it authenticates. This is the on-device
@@ -746,33 +753,33 @@ open class RingSession:
      * Only valid on a reset ring: one that still holds a key answers `set_auth_key`
      * with a non-zero status and the call fails without changing anything.
      */
-    open func pair(existingKeyHex: String?) async throws -> PairReport {
-        return
-            try await uniffiRustCallAsync(
-                rustFutureFunc: {
-                    uniffi_oura_core_fn_method_ringsession_pair(
-                        self.uniffiClonePointer(),
-                        FfiConverterOptionString.lower(existingKeyHex)
-                    )
-                },
-                pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
-                completeFunc: ffi_oura_core_rust_future_complete_rust_buffer,
-                freeFunc: ffi_oura_core_rust_future_free_rust_buffer,
-                liftFunc: FfiConverterTypePairReport.lift,
-                errorHandler: FfiConverterTypeSyncError.lift
-            )
-    }
-
+open func pair(existingKeyHex: String?)async throws  -> PairReport {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_oura_core_fn_method_ringsession_pair(
+                    self.uniffiClonePointer(),
+                    FfiConverterOptionString.lower(existingKeyHex)
+                )
+            },
+            pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_oura_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_oura_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypePairReport.lift,
+            errorHandler: FfiConverterTypeSyncError.lift
+        )
+}
+    
     /**
      * Swift pushes each inbound BLE notification frame here.
      */
-    open func pushFrame(data: Data) {
-        try! rustCall {
-            uniffi_oura_core_fn_method_ringsession_push_frame(self.uniffiClonePointer(),
-                                                              FfiConverterData.lower(data), $0)
-        }
-    }
-
+open func pushFrame(data: Data) {try! rustCall() {
+    uniffi_oura_core_fn_method_ringsession_push_frame(self.uniffiClonePointer(),
+        FfiConverterData.lower(data),$0
+    )
+}
+}
+    
     /**
      * Authenticate, set up the app stream, and drain history events into the DB at
      * `db_path`. `key_hex` is the 32-char ring auth key. `progress` receives stage
@@ -781,28 +788,31 @@ open class RingSession:
      * The drain checkpoints its cursor after every batch, so a failed call can be
      * retried (reconnect + call again) and resumes where it left off.
      */
-    open func sync(dbPath: String, keyHex: String, progress: SyncProgressListener) async throws -> SyncReport {
-        return
-            try await uniffiRustCallAsync(
-                rustFutureFunc: {
-                    uniffi_oura_core_fn_method_ringsession_sync(
-                        self.uniffiClonePointer(),
-                        FfiConverterString.lower(dbPath), FfiConverterString.lower(keyHex), FfiConverterCallbackInterfaceSyncProgressListener.lower(progress)
-                    )
-                },
-                pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
-                completeFunc: ffi_oura_core_rust_future_complete_rust_buffer,
-                freeFunc: ffi_oura_core_rust_future_free_rust_buffer,
-                liftFunc: FfiConverterTypeSyncReport.lift,
-                errorHandler: FfiConverterTypeSyncError.lift
-            )
-    }
+open func sync(dbPath: String, keyHex: String, progress: SyncProgressListener)async throws  -> SyncReport {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_oura_core_fn_method_ringsession_sync(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(dbPath),FfiConverterString.lower(keyHex),FfiConverterCallbackInterfaceSyncProgressListener.lower(progress)
+                )
+            },
+            pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
+            completeFunc: ffi_oura_core_rust_future_complete_rust_buffer,
+            freeFunc: ffi_oura_core_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSyncReport.lift,
+            errorHandler: FfiConverterTypeSyncError.lift
+        )
+}
+    
+
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeRingSession: FfiConverter {
+
     typealias FfiType = UnsafeMutableRawPointer
     typealias SwiftType = RingSession
 
@@ -819,7 +829,7 @@ public struct FfiConverterTypeRingSession: FfiConverter {
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
         let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if ptr == nil {
+        if (ptr == nil) {
             throw UniffiInternalError.unexpectedNullPointer
         }
         return try lift(ptr!)
@@ -832,19 +842,23 @@ public struct FfiConverterTypeRingSession: FfiConverter {
     }
 }
 
+
+
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRingSession_lift(_ pointer: UnsafeMutableRawPointer) throws -> RingSession {
     return try FfiConverterTypeRingSession.lift(pointer)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeRingSession_lower(_ value: RingSession) -> UnsafeMutableRawPointer {
     return FfiConverterTypeRingSession.lower(value)
 }
+
 
 /**
  * What a successful [`RingSession::pair`] installed.
@@ -862,22 +876,23 @@ public struct PairReport {
      */
     public var minted: Bool
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
-    public init(serial: String, keyHex: String,
-                /*
-                    * True when the key was freshly minted here, false when `existing_key_hex`
-                    * re-installed a key the caller already held.
-                    */ minted: Bool)
-    {
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(serial: String, keyHex: String, 
+        /**
+         * True when the key was freshly minted here, false when `existing_key_hex`
+         * re-installed a key the caller already held.
+         */minted: Bool) {
         self.serial = serial
         self.keyHex = keyHex
         self.minted = minted
     }
 }
 
+
+
 extension PairReport: Equatable, Hashable {
-    public static func == (lhs: PairReport, rhs: PairReport) -> Bool {
+    public static func ==(lhs: PairReport, rhs: PairReport) -> Bool {
         if lhs.serial != rhs.serial {
             return false
         }
@@ -897,17 +912,18 @@ extension PairReport: Equatable, Hashable {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypePairReport: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PairReport {
         return
             try PairReport(
-                serial: FfiConverterString.read(from: &buf),
-                keyHex: FfiConverterString.read(from: &buf),
+                serial: FfiConverterString.read(from: &buf), 
+                keyHex: FfiConverterString.read(from: &buf), 
                 minted: FfiConverterBool.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: PairReport, into buf: inout [UInt8]) {
@@ -917,19 +933,21 @@ public struct FfiConverterTypePairReport: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypePairReport_lift(_ buf: RustBuffer) throws -> PairReport {
     return try FfiConverterTypePairReport.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypePairReport_lower(_ value: PairReport) -> RustBuffer {
     return FfiConverterTypePairReport.lower(value)
 }
+
 
 public struct SyncReport {
     public var serial: String
@@ -937,8 +955,8 @@ public struct SyncReport {
     public var inserted: UInt32
     public var nextCursor: UInt32
 
-    /// Default memberwise initializers are never public by default, so we
-    /// declare one manually.
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
     public init(serial: String, eventsSynced: UInt32, inserted: UInt32, nextCursor: UInt32) {
         self.serial = serial
         self.eventsSynced = eventsSynced
@@ -947,8 +965,10 @@ public struct SyncReport {
     }
 }
 
+
+
 extension SyncReport: Equatable, Hashable {
-    public static func == (lhs: SyncReport, rhs: SyncReport) -> Bool {
+    public static func ==(lhs: SyncReport, rhs: SyncReport) -> Bool {
         if lhs.serial != rhs.serial {
             return false
         }
@@ -972,18 +992,19 @@ extension SyncReport: Equatable, Hashable {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeSyncReport: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncReport {
         return
             try SyncReport(
-                serial: FfiConverterString.read(from: &buf),
-                eventsSynced: FfiConverterUInt32.read(from: &buf),
-                inserted: FfiConverterUInt32.read(from: &buf),
+                serial: FfiConverterString.read(from: &buf), 
+                eventsSynced: FfiConverterUInt32.read(from: &buf), 
+                inserted: FfiConverterUInt32.read(from: &buf), 
                 nextCursor: FfiConverterUInt32.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: SyncReport, into buf: inout [UInt8]) {
@@ -994,28 +1015,37 @@ public struct FfiConverterTypeSyncReport: FfiConverterRustBuffer {
     }
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeSyncReport_lift(_ buf: RustBuffer) throws -> SyncReport {
     return try FfiConverterTypeSyncReport.lift(buf)
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public func FfiConverterTypeSyncReport_lower(_ value: SyncReport) -> RustBuffer {
     return FfiConverterTypeSyncReport.lower(value)
 }
 
+
 public enum SyncError {
-    case Failed(String)
-    case Storage(operation: String, code: Int32, extendedCode: Int32, message: String, retryable: Bool, checkpoint: UInt32)
-    case Interrupted(reason: String)
+
+    
+    
+    case Failed(String
+    )
+    case Storage(operation: String, code: Int32, extendedCode: Int32, message: String, retryable: Bool, checkpoint: UInt32
+    )
+    case Interrupted(reason: String
+    )
 }
 
+
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeSyncError: FfiConverterRustBuffer {
     typealias SwiftType = SyncError
@@ -1023,31 +1053,42 @@ public struct FfiConverterTypeSyncError: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncError {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        case 1: return try .Failed(
-                FfiConverterString.read(from: &buf)
+
+        
+
+        
+        case 1: return .Failed(
+            try FfiConverterString.read(from: &buf)
             )
-        case 2: return try .Storage(
-                operation: FfiConverterString.read(from: &buf),
-                code: FfiConverterInt32.read(from: &buf),
-                extendedCode: FfiConverterInt32.read(from: &buf),
-                message: FfiConverterString.read(from: &buf),
-                retryable: FfiConverterBool.read(from: &buf),
-                checkpoint: FfiConverterUInt32.read(from: &buf)
+        case 2: return .Storage(
+            operation: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterInt32.read(from: &buf), 
+            extendedCode: try FfiConverterInt32.read(from: &buf), 
+            message: try FfiConverterString.read(from: &buf), 
+            retryable: try FfiConverterBool.read(from: &buf), 
+            checkpoint: try FfiConverterUInt32.read(from: &buf)
             )
-        case 3: return try .Interrupted(
-                reason: FfiConverterString.read(from: &buf)
+        case 3: return .Interrupted(
+            reason: try FfiConverterString.read(from: &buf)
             )
-        default: throw UniffiInternalError.unexpectedEnumCase
+
+         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: SyncError, into buf: inout [UInt8]) {
         switch value {
+
+        
+
+        
+        
         case let .Failed(v1):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(v1, into: &buf)
-
-        case let .Storage(operation, code, extendedCode, message, retryable, checkpoint):
+            
+        
+        case let .Storage(operation,code,extendedCode,message,retryable,checkpoint):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(operation, into: &buf)
             FfiConverterInt32.write(code, into: &buf)
@@ -1055,13 +1096,16 @@ public struct FfiConverterTypeSyncError: FfiConverterRustBuffer {
             FfiConverterString.write(message, into: &buf)
             FfiConverterBool.write(retryable, into: &buf)
             FfiConverterUInt32.write(checkpoint, into: &buf)
-
+            
+        
         case let .Interrupted(reason):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(reason, into: &buf)
+            
         }
     }
 }
+
 
 extension SyncError: Equatable, Hashable {}
 
@@ -1071,43 +1115,50 @@ extension SyncError: Foundation.LocalizedError {
     }
 }
 
+
+
+
 /**
  * Swift implements this to send one request frame over CoreBluetooth. Fire-and-
  * forget: the ring's responses come back asynchronously via `push_frame`.
  */
-public protocol BleWriter: AnyObject {
-    func write(data: Data)
+public protocol BleWriter : AnyObject {
+    
+    func write(data: Data) 
+    
 }
 
-/// Magic number for the Rust proxy to call using the same mechanism as every other method,
-/// to free the callback once it's dropped by Rust.
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
 private let IDX_CALLBACK_FREE: Int32 = 0
 // Callback return codes
 private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
 private let UNIFFI_CALLBACK_ERROR: Int32 = 1
 private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
-/// Put the implementation in a struct so we don't pollute the top-level namespace
-private enum UniffiCallbackInterfaceBleWriter {
-    /// Create the VTable using a series of closures.
-    /// Swift automatically converts these into C callback functions.
-    static var vtable: UniffiVTableCallbackInterfaceBleWriter = .init(
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceBleWriter {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    static var vtable: UniffiVTableCallbackInterfaceBleWriter = UniffiVTableCallbackInterfaceBleWriter(
         write: { (
             uniffiHandle: UInt64,
             data: RustBuffer,
-            _: UnsafeMutableRawPointer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
             uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
         ) in
             let makeCall = {
-                () throws in
+                () throws -> () in
                 guard let uniffiObj = try? FfiConverterCallbackInterfaceBleWriter.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
-                return try uniffiObj.write(
-                    data: FfiConverterData.lift(data)
+                return uniffiObj.write(
+                     data: try FfiConverterData.lift(data)
                 )
             }
 
+            
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -1115,7 +1166,7 @@ private enum UniffiCallbackInterfaceBleWriter {
                 writeReturn: writeReturn
             )
         },
-        uniffiFree: { (uniffiHandle: UInt64) in
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
             let result = try? FfiConverterCallbackInterfaceBleWriter.handleMap.remove(handle: uniffiHandle)
             if result == nil {
                 print("Uniffi callback interface BleWriter: handle missing in uniffiFree")
@@ -1130,48 +1181,51 @@ private func uniffiCallbackInitBleWriter() {
 
 // FfiConverter protocol for callback interfaces
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private enum FfiConverterCallbackInterfaceBleWriter {
+fileprivate struct FfiConverterCallbackInterfaceBleWriter {
     fileprivate static var handleMap = UniffiHandleMap<BleWriter>()
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-extension FfiConverterCallbackInterfaceBleWriter: FfiConverter {
+extension FfiConverterCallbackInterfaceBleWriter : FfiConverter {
     typealias SwiftType = BleWriter
     typealias FfiType = UInt64
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ handle: UInt64) throws -> SwiftType {
         try handleMap.get(handle: handle)
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ v: SwiftType) -> UInt64 {
         return handleMap.insert(obj: v)
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(v))
     }
 }
+
+
+
 
 /**
  * Swift implements this to receive sync progress. `stage` is a short machine
@@ -1179,35 +1233,41 @@ extension FfiConverterCallbackInterfaceBleWriter: FfiConverter {
  * own count of event bytes still to transfer (0 = unknown/finished) and
  * `events_synced` the events pulled so far this session.
  */
-public protocol SyncProgressListener: AnyObject {
-    func onProgress(stage: String, bytesLeft: UInt64, eventsSynced: UInt32)
+public protocol SyncProgressListener : AnyObject {
+    
+    func onProgress(stage: String, bytesLeft: UInt64, eventsSynced: UInt32) 
+    
 }
 
-/// Put the implementation in a struct so we don't pollute the top-level namespace
-private enum UniffiCallbackInterfaceSyncProgressListener {
-    /// Create the VTable using a series of closures.
-    /// Swift automatically converts these into C callback functions.
-    static var vtable: UniffiVTableCallbackInterfaceSyncProgressListener = .init(
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceSyncProgressListener {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    static var vtable: UniffiVTableCallbackInterfaceSyncProgressListener = UniffiVTableCallbackInterfaceSyncProgressListener(
         onProgress: { (
             uniffiHandle: UInt64,
             stage: RustBuffer,
             bytesLeft: UInt64,
             eventsSynced: UInt32,
-            _: UnsafeMutableRawPointer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
             uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
         ) in
             let makeCall = {
-                () throws in
+                () throws -> () in
                 guard let uniffiObj = try? FfiConverterCallbackInterfaceSyncProgressListener.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
-                return try uniffiObj.onProgress(
-                    stage: FfiConverterString.lift(stage),
-                    bytesLeft: FfiConverterUInt64.lift(bytesLeft),
-                    eventsSynced: FfiConverterUInt32.lift(eventsSynced)
+                return uniffiObj.onProgress(
+                     stage: try FfiConverterString.lift(stage),
+                     bytesLeft: try FfiConverterUInt64.lift(bytesLeft),
+                     eventsSynced: try FfiConverterUInt32.lift(eventsSynced)
                 )
             }
 
+            
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -1215,7 +1275,7 @@ private enum UniffiCallbackInterfaceSyncProgressListener {
                 writeReturn: writeReturn
             )
         },
-        uniffiFree: { (uniffiHandle: UInt64) in
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
             let result = try? FfiConverterCallbackInterfaceSyncProgressListener.handleMap.remove(handle: uniffiHandle)
             if result == nil {
                 print("Uniffi callback interface SyncProgressListener: handle missing in uniffiFree")
@@ -1230,56 +1290,56 @@ private func uniffiCallbackInitSyncProgressListener() {
 
 // FfiConverter protocol for callback interfaces
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private enum FfiConverterCallbackInterfaceSyncProgressListener {
+fileprivate struct FfiConverterCallbackInterfaceSyncProgressListener {
     fileprivate static var handleMap = UniffiHandleMap<SyncProgressListener>()
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-extension FfiConverterCallbackInterfaceSyncProgressListener: FfiConverter {
+extension FfiConverterCallbackInterfaceSyncProgressListener : FfiConverter {
     typealias SwiftType = SyncProgressListener
     typealias FfiType = UInt64
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lift(_ handle: UInt64) throws -> SwiftType {
         try handleMap.get(handle: handle)
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func lower(_ v: SwiftType) -> UInt64 {
         return handleMap.insert(obj: v)
     }
 
-    #if swift(>=5.8)
-        @_documentation(visibility: private)
-    #endif
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
     public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(v))
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterOptionString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
-    static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
             writeInt(&buf, Int8(0))
             return
@@ -1288,7 +1348,7 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
         FfiConverterString.write(value, into: &buf)
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
@@ -1298,12 +1358,12 @@ private struct FfiConverterOptionString: FfiConverterRustBuffer {
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceUInt16: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceUInt16: FfiConverterRustBuffer {
     typealias SwiftType = [UInt16]
 
-    static func write(_ value: [UInt16], into buf: inout [UInt8]) {
+    public static func write(_ value: [UInt16], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -1311,24 +1371,24 @@ private struct FfiConverterSequenceUInt16: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt16] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt16] {
         let len: Int32 = try readInt(&buf)
         var seq = [UInt16]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterUInt16.read(from: &buf))
+            seq.append(try FfiConverterUInt16.read(from: &buf))
         }
         return seq
     }
 }
 
 #if swift(>=5.8)
-    @_documentation(visibility: private)
+@_documentation(visibility: private)
 #endif
-private struct FfiConverterSequenceString: FfiConverterRustBuffer {
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
-    static func write(_ value: [String], into buf: inout [UInt8]) {
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
@@ -1336,27 +1396,26 @@ private struct FfiConverterSequenceString: FfiConverterRustBuffer {
         }
     }
 
-    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
         let len: Int32 = try readInt(&buf)
         var seq = [String]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            try seq.append(FfiConverterString.read(from: &buf))
+            seq.append(try FfiConverterString.read(from: &buf))
         }
         return seq
     }
 }
-
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
 
-private let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
+fileprivate let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
 
-private func uniffiRustCallAsync<F, T>(
+fileprivate func uniffiRustCallAsync<F, T>(
     rustFutureFunc: () -> UInt64,
-    pollFunc: (UInt64, @escaping UniffiRustFutureContinuationCallback, UInt64) -> Void,
+    pollFunc: (UInt64, @escaping UniffiRustFutureContinuationCallback, UInt64) -> (),
     completeFunc: (UInt64, UnsafeMutablePointer<RustCallStatus>) -> F,
-    freeFunc: (UInt64) -> Void,
+    freeFunc: (UInt64) -> (),
     liftFunc: (F) throws -> T,
     errorHandler: ((RustBuffer) throws -> Swift.Error)?
 ) async throws -> T {
@@ -1367,7 +1426,7 @@ private func uniffiRustCallAsync<F, T>(
     defer {
         freeFunc(rustFuture)
     }
-    var pollResult: Int8
+    var pollResult: Int8;
     repeat {
         pollResult = await withUnsafeContinuation {
             pollFunc(
@@ -1384,28 +1443,26 @@ private func uniffiRustCallAsync<F, T>(
     ))
 }
 
-/// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
-/// lift the return value or error and resume the suspended function.
-private func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) {
+// Callback handlers for an async calls.  These are invoked by Rust when the future is ready.  They
+// lift the return value or error and resume the suspended function.
+fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: Int8) {
     if let continuation = try? uniffiContinuationHandleMap.remove(handle: handle) {
         continuation.resume(returning: pollResult)
     } else {
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
-
 /**
  * Record a research "mark now" at the phone's current time; returns that unix time.
  */
-public func addResearchMarker(dbPath: String, label: String) throws -> Double {
-    return try FfiConverterDouble.lift(rustCallWithError(FfiConverterTypeSyncError.lift) {
-        uniffi_oura_core_fn_func_add_research_marker(
-            FfiConverterString.lower(dbPath),
-            FfiConverterString.lower(label), $0
-        )
-    })
+public func addResearchMarker(dbPath: String, label: String)throws  -> Double {
+    return try  FfiConverterDouble.lift(try rustCallWithError(FfiConverterTypeSyncError.lift) {
+    uniffi_oura_core_fn_func_add_research_marker(
+        FfiConverterString.lower(dbPath),
+        FfiConverterString.lower(label),$0
+    )
+})
 }
-
 /**
  * Write a clean single-file copy of the database to `dest_path` — the export half of
  * backup/restore.
@@ -1418,32 +1475,41 @@ public func addResearchMarker(dbPath: String, label: String) throws -> Double {
  * The result carries ring data only. The auth key lives in the Keychain and is NOT in
  * here — restoring onto a fresh phone still needs the key entered separately.
  */
-public func backupDatabase(dbPath: String, destPath: String) throws -> UInt64 {
-    return try FfiConverterUInt64.lift(rustCallWithError(FfiConverterTypeSyncError.lift) {
-        uniffi_oura_core_fn_func_backup_database(
-            FfiConverterString.lower(dbPath),
-            FfiConverterString.lower(destPath), $0
-        )
-    })
+public func backupDatabase(dbPath: String, destPath: String)throws  -> UInt64 {
+    return try  FfiConverterUInt64.lift(try rustCallWithError(FfiConverterTypeSyncError.lift) {
+    uniffi_oura_core_fn_func_backup_database(
+        FfiConverterString.lower(dbPath),
+        FfiConverterString.lower(destPath),$0
+    )
+})
 }
-
+/**
+ * Remove an imported Oura export (history and calibration). Returns `{}` or
+ * `{ "error": "…" }`.
+ */
+public func clearOuraExport(dbPath: String) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_clear_oura_export(
+        FfiConverterString.lower(dbPath),$0
+    )
+})
+}
 /**
  * Build/version string — a trivial call to validate the FFI round-trip.
  */
 public func coreVersion() -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_core_version($0)
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_core_version($0
+    )
+})
 }
-
-public func databaseIntegrity(dbPath: String) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeSyncError.lift) {
-        uniffi_oura_core_fn_func_database_integrity(
-            FfiConverterString.lower(dbPath), $0
-        )
-    })
+public func databaseIntegrity(dbPath: String)throws  -> String {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeSyncError.lift) {
+    uniffi_oura_core_fn_func_database_integrity(
+        FfiConverterString.lower(dbPath),$0
+    )
+})
 }
-
 /**
  * Rule-based workout detection for builds without Oura's activity model: runs of
  * sustained moderate-or-harder movement in the last `days` days, newest first.
@@ -1451,15 +1517,14 @@ public func databaseIntegrity(dbPath: String) throws -> String {
  * Returns `{ "sessions": [...] }`, or `{ "error": "…" }`.
  */
 public func detectedWorkoutsJson(dbPath: String, tzOffset: Int64, days: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_detected_workouts_json(
-            FfiConverterString.lower(dbPath),
-            FfiConverterInt64.lower(tzOffset),
-            FfiConverterUInt32.lower(days), $0
-        )
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_detected_workouts_json(
+        FfiConverterString.lower(dbPath),
+        FfiConverterInt64.lower(tzOffset),
+        FfiConverterUInt32.lower(days),$0
+    )
+})
 }
-
 /**
  * Every decoded event the ring has sent, newest first — the raw-data browser and
  * the debug charts behind it.
@@ -1478,30 +1543,27 @@ public func detectedWorkoutsJson(dbPath: String, tzOffset: Int64, days: UInt32) 
  * Returns `{ counts: [{name, total, decoded}], events: [...] }`, or `{ "error": … }`.
  */
 public func eventsJson(dbPath: String, nameFilter: String, limit: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_events_json(
-            FfiConverterString.lower(dbPath),
-            FfiConverterString.lower(nameFilter),
-            FfiConverterUInt32.lower(limit), $0
-        )
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_events_json(
+        FfiConverterString.lower(dbPath),
+        FfiConverterString.lower(nameFilter),
+        FfiConverterUInt32.lower(limit),$0
+    )
+})
 }
-
 /**
  * Copy the synced database to `out_path` as one self-contained SQLite file
  * (SQLite page backup), so the exact on-phone ring records can be replayed on the
  * desktop with `oura --db <file> …`. The auth key lives in the Keychain and is
  * never part of the database.
  */
-public func exportDatabase(dbPath: String, outPath: String) throws {
-    try rustCallWithError(FfiConverterTypeSyncError.lift) {
-        uniffi_oura_core_fn_func_export_database(
-            FfiConverterString.lower(dbPath),
-            FfiConverterString.lower(outPath), $0
-        )
-    }
+public func exportDatabase(dbPath: String, outPath: String)throws  {try rustCallWithError(FfiConverterTypeSyncError.lift) {
+    uniffi_oura_core_fn_func_export_database(
+        FfiConverterString.lower(dbPath),
+        FfiConverterString.lower(outPath),$0
+    )
 }
-
+}
 /**
  * Hourly heart-rate bars for the HR detail screen — one bar per local-clock
  * hour, `{low, high, mean, count}`, plus the newest quality-gated
@@ -1514,57 +1576,68 @@ public func exportDatabase(dbPath: String, outPath: String) throws {
  * Returns the JSON string, or `{ "error": "…" }`.
  */
 public func hourlyHrJson(dbPath: String, tzOffset: Int64, days: UInt32) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_hourly_hr_json(
-            FfiConverterString.lower(dbPath),
-            FfiConverterInt64.lower(tzOffset),
-            FfiConverterUInt32.lower(days), $0
-        )
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_hourly_hr_json(
+        FfiConverterString.lower(dbPath),
+        FfiConverterInt64.lower(tzOffset),
+        FfiConverterUInt32.lower(days),$0
+    )
+})
 }
-
+/**
+ * Import an Oura account trends export (the CSV's text). Fits the score
+ * calibration on this device and keeps the daily history, both in
+ * `oura_export.json` next to the database. Returns
+ * `{days, first, last, calibrated: {sleep, readiness}, calibration_days}`, or
+ * `{ "error": "…" }` naming the columns found when the file isn't recognised.
+ */
+public func importOuraExport(dbPath: String, csvText: String) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_import_oura_export(
+        FfiConverterString.lower(dbPath),
+        FfiConverterString.lower(csvText),$0
+    )
+})
+}
 /**
  * A lightweight, model-free summary (device + data-health only) — kept as a fast
  * path / fallback. Returns `{ serials, device, event_counts, total_events, raw_events, decoded_events }`.
  */
 public func quickSummaryJson(dbPath: String) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_quick_summary_json(
-            FfiConverterString.lower(dbPath), $0
-        )
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_quick_summary_json(
+        FfiConverterString.lower(dbPath),$0
+    )
+})
 }
-
 /**
  * Write the research export (raw per-beat / per-window CSVs for
  * `[start_unix, end_unix)`, see `oura_summary::research_export`) as a ZIP into
  * `out_dir` and return its path. Same bytes as the web dashboard and the CLI.
  */
-public func researchExport(dbPath: String, startUnix: Double, endUnix: Double, streams: [String], tzOffsetHours: Double, outDir: String) throws -> String {
-    return try FfiConverterString.lift(rustCallWithError(FfiConverterTypeSyncError.lift) {
-        uniffi_oura_core_fn_func_research_export(
-            FfiConverterString.lower(dbPath),
-            FfiConverterDouble.lower(startUnix),
-            FfiConverterDouble.lower(endUnix),
-            FfiConverterSequenceString.lower(streams),
-            FfiConverterDouble.lower(tzOffsetHours),
-            FfiConverterString.lower(outDir), $0
-        )
-    })
+public func researchExport(dbPath: String, startUnix: Double, endUnix: Double, streams: [String], tzOffsetHours: Double, outDir: String)throws  -> String {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeSyncError.lift) {
+    uniffi_oura_core_fn_func_research_export(
+        FfiConverterString.lower(dbPath),
+        FfiConverterDouble.lower(startUnix),
+        FfiConverterDouble.lower(endUnix),
+        FfiConverterSequenceString.lower(streams),
+        FfiConverterDouble.lower(tzOffsetHours),
+        FfiConverterString.lower(outDir),$0
+    )
+})
 }
-
 /**
  * HRV RMSSD (ms) over inter-beat intervals — the shared `oura-analysis` algorithm,
  * reachable natively. Returns -1 when the input is too short.
  */
 public func rmssd(ibiMs: [UInt16]) -> Double {
-    return try! FfiConverterDouble.lift(try! rustCall {
-        uniffi_oura_core_fn_func_rmssd(
-            FfiConverterSequenceUInt16.lower(ibiMs), $0
-        )
-    })
+    return try!  FfiConverterDouble.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_rmssd(
+        FfiConverterSequenceUInt16.lower(ibiMs),$0
+    )
+})
 }
-
 /**
  * The full dashboard summary — the SAME `build_summary()` JSON the web client
  * renders, computed from the synced SQLite DB. `tz_offset` is hours from UTC.
@@ -1578,14 +1651,13 @@ public func rmssd(ibiMs: [UInt16]) -> Double {
  * Returns the summary JSON string, or `{ "error": "…" }`.
  */
 public func summaryJson(dbPath: String, tzOffset: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_summary_json(
-            FfiConverterString.lower(dbPath),
-            FfiConverterInt64.lower(tzOffset), $0
-        )
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_summary_json(
+        FfiConverterString.lower(dbPath),
+        FfiConverterInt64.lower(tzOffset),$0
+    )
+})
 }
-
 /**
  * What the ring recorded during a user-started or user-logged workout: MET-derived
  * active calories, estimated steps and distance, and quality-gated heart rate
@@ -1595,13 +1667,13 @@ public func summaryJson(dbPath: String, tzOffset: Int64) -> String {
  * Returns the JSON string, or `{ "error": "…" }`.
  */
 public func workoutStatsJson(dbPath: String, startUnix: Int64, endUnix: Int64) -> String {
-    return try! FfiConverterString.lift(try! rustCall {
-        uniffi_oura_core_fn_func_workout_stats_json(
-            FfiConverterString.lower(dbPath),
-            FfiConverterInt64.lower(startUnix),
-            FfiConverterInt64.lower(endUnix), $0
-        )
-    })
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_workout_stats_json(
+        FfiConverterString.lower(dbPath),
+        FfiConverterInt64.lower(startUnix),
+        FfiConverterInt64.lower(endUnix),$0
+    )
+})
 }
 
 private enum InitializationResult {
@@ -1609,9 +1681,8 @@ private enum InitializationResult {
     case contractVersionMismatch
     case apiChecksumMismatch
 }
-
-/// Use a global variable to perform the versioning checks. Swift ensures that
-/// the code inside is only computed once.
+// Use a global variable to perform the versioning checks. Swift ensures that
+// the code inside is only computed once.
 private var initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 26
@@ -1620,67 +1691,73 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if uniffi_oura_core_checksum_func_add_research_marker() != 62335 {
+    if (uniffi_oura_core_checksum_func_add_research_marker() != 62335) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_backup_database() != 40677 {
+    if (uniffi_oura_core_checksum_func_backup_database() != 40677) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_core_version() != 24695 {
+    if (uniffi_oura_core_checksum_func_clear_oura_export() != 64223) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_database_integrity() != 19533 {
+    if (uniffi_oura_core_checksum_func_core_version() != 24695) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_detected_workouts_json() != 28531 {
+    if (uniffi_oura_core_checksum_func_database_integrity() != 19533) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_events_json() != 22398 {
+    if (uniffi_oura_core_checksum_func_detected_workouts_json() != 28531) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_export_database() != 30024 {
+    if (uniffi_oura_core_checksum_func_events_json() != 22398) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_hourly_hr_json() != 21410 {
+    if (uniffi_oura_core_checksum_func_export_database() != 30024) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_quick_summary_json() != 3685 {
+    if (uniffi_oura_core_checksum_func_hourly_hr_json() != 21410) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_research_export() != 56017 {
+    if (uniffi_oura_core_checksum_func_import_oura_export() != 36274) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_rmssd() != 51404 {
+    if (uniffi_oura_core_checksum_func_quick_summary_json() != 3685) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_summary_json() != 27782 {
+    if (uniffi_oura_core_checksum_func_research_export() != 56017) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_func_workout_stats_json() != 30308 {
+    if (uniffi_oura_core_checksum_func_rmssd() != 51404) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_ringsession_cancel() != 11635 {
+    if (uniffi_oura_core_checksum_func_summary_json() != 27782) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_ringsession_factory_reset() != 9780 {
+    if (uniffi_oura_core_checksum_func_workout_stats_json() != 30308) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_ringsession_pair() != 40653 {
+    if (uniffi_oura_core_checksum_method_ringsession_cancel() != 11635) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_ringsession_push_frame() != 19557 {
+    if (uniffi_oura_core_checksum_method_ringsession_factory_reset() != 9780) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_ringsession_sync() != 10321 {
+    if (uniffi_oura_core_checksum_method_ringsession_pair() != 40653) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_constructor_ringsession_new() != 7650 {
+    if (uniffi_oura_core_checksum_method_ringsession_push_frame() != 19557) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_blewriter_write() != 56807 {
+    if (uniffi_oura_core_checksum_method_ringsession_sync() != 10321) {
         return InitializationResult.apiChecksumMismatch
     }
-    if uniffi_oura_core_checksum_method_syncprogresslistener_on_progress() != 32063 {
+    if (uniffi_oura_core_checksum_constructor_ringsession_new() != 7650) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_oura_core_checksum_method_blewriter_write() != 56807) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_oura_core_checksum_method_syncprogresslistener_on_progress() != 32063) {
         return InitializationResult.apiChecksumMismatch
     }
 

@@ -341,6 +341,11 @@ double uniffi_oura_core_fn_func_add_research_marker(RustBuffer db_path, RustBuff
 uint64_t uniffi_oura_core_fn_func_backup_database(RustBuffer db_path, RustBuffer dest_path, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_CLEAR_OURA_EXPORT
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_CLEAR_OURA_EXPORT
+RustBuffer uniffi_oura_core_fn_func_clear_oura_export(RustBuffer db_path, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_CORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_CORE_VERSION
 RustBuffer uniffi_oura_core_fn_func_core_version(RustCallStatus *_Nonnull out_status
@@ -370,6 +375,11 @@ void uniffi_oura_core_fn_func_export_database(RustBuffer db_path, RustBuffer out
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_HOURLY_HR_JSON
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_HOURLY_HR_JSON
 RustBuffer uniffi_oura_core_fn_func_hourly_hr_json(RustBuffer db_path, int64_t tz_offset, uint32_t days, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_IMPORT_OURA_EXPORT
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_IMPORT_OURA_EXPORT
+RustBuffer uniffi_oura_core_fn_func_import_oura_export(RustBuffer db_path, RustBuffer csv_text, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_FUNC_QUICK_SUMMARY_JSON
@@ -689,6 +699,12 @@ uint16_t uniffi_oura_core_checksum_func_backup_database(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_CLEAR_OURA_EXPORT
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_CLEAR_OURA_EXPORT
+uint16_t uniffi_oura_core_checksum_func_clear_oura_export(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_CORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_CORE_VERSION
 uint16_t uniffi_oura_core_checksum_func_core_version(void
@@ -722,6 +738,12 @@ uint16_t uniffi_oura_core_checksum_func_export_database(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_HOURLY_HR_JSON
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_HOURLY_HR_JSON
 uint16_t uniffi_oura_core_checksum_func_hourly_hr_json(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_IMPORT_OURA_EXPORT
+#define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_CHECKSUM_FUNC_IMPORT_OURA_EXPORT
+uint16_t uniffi_oura_core_checksum_func_import_oura_export(void
     
 );
 #endif

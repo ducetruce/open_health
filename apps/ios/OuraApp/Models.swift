@@ -85,6 +85,10 @@ struct NightRow: Codable, Identifiable {
     var sleep_score: SleepScore? = nil
     /// How recovered this night left you, against your own recent nights.
     var readiness: SleepScore? = nil
+    /// The sleep score on Oura's scale, when an Oura export has been imported.
+    var oura_sleep_score: SleepScore? = nil
+    /// The headline sleep score: Oura-calibrated when available.
+    var mainSleepScore: SleepScore? { oura_sleep_score ?? sleep_score }
     var id: String { (date ?? "") + (start ?? "") }
     var hasHypnogram: Bool { (hypnogram?.count ?? 0) > 1 }
     var isBedtimeManual: Bool { bedtime_manual ?? false }
@@ -116,6 +120,12 @@ struct SleepScoreComponent: Codable, Identifiable {
         case "sleep_balance": return "Sleep balance"
         case "recovery_index": return "Recovery index"
         case "previous_day_activity": return "Previous day activity"
+        case "total_sleep": return "Total sleep"
+        case "restfulness": return "Restfulness"
+        case "rem_sleep": return "REM sleep"
+        case "deep_sleep": return "Deep sleep"
+        case "latency": return "Time to fall asleep"
+        case "timing": return "Sleep timing"
         case "activity_balance": return "Activity balance"
         default: return key
         }
@@ -206,6 +216,21 @@ struct SleepDebtSummary: Codable {
     var state: String = "none"
     var days: [SleepDebtDay] = []
 }
+/// One day of an imported Oura export, on Oura's own scales.
+struct ImportedDay: Codable {
+    var sleep_score: Double?; var readiness: Double?; var activity_score: Double?
+    var asleep_s: Double?; var rhr: Double?; var hrv_ms: Double?
+    var temp_deviation: Double?; var breath_rate: Double?
+    var steps: Double?; var active_kcal: Double?
+}
+
+/// What an Oura export import covered.
+struct OuraImportInfo: Codable {
+    struct Calibrated: Codable { var sleep: Bool?; var readiness: Bool? }
+    var days: Int?; var first: String?; var last: String?
+    var calibrated: Calibrated?
+}
+
 struct Device: Codable {
     var serial: String?; var firmware: String?
     var battery_pct: Int?
@@ -334,6 +359,9 @@ struct Summary: Codable {
     /// merged in from `WorkoutStore` by `withUserWorkouts(_:)`.
     var userWorkouts: [WorkoutSession] = []
     var modelErrors: [String] = []        // on-device model failures (not in the JSON)
+    /// Daily values from an imported Oura export, keyed by date (can predate the ring).
+    var imported_history: [String: ImportedDay] = [:]
+    var oura_import: OuraImportInfo?
     var error: String?
     // `workouts`/`modelErrors` are filled on-device (not in the FFI JSON), so keep them
     // out of decoding.
@@ -341,6 +369,7 @@ struct Summary: Codable {
         case analysis_digest, analysis_version
         case digest, device, nights, clock, vitals, activity_profile, activity_daily, profile, cardio, fitness, error
         case symptoms
+        case imported_history, oura_import
         case sleepDebt = "sleep_debt"
     }
     init() {}
@@ -364,6 +393,8 @@ struct Summary: Codable {
         fitness = try? c.decodeIfPresent(Fitness.self, forKey: .fitness)
         sleepDebt = try? c.decodeIfPresent(SleepDebtSummary.self, forKey: .sleepDebt)
         symptoms = try? c.decodeIfPresent(IllnessResult.self, forKey: .symptoms)
+        imported_history = (try? c.decodeIfPresent([String: ImportedDay].self, forKey: .imported_history)) ?? [:]
+        oura_import = try? c.decodeIfPresent(OuraImportInfo.self, forKey: .oura_import)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
     }
     /// recent days (newest first) that have a movement profile.

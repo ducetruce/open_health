@@ -168,8 +168,10 @@ struct AllDaysView: View {
             }
             Spacer(minLength: 4)
             HStack(spacing: 10) {
-                dayScore(night?.readiness?.score, label: "Ready", color: Obs.readinessAccent)
-                dayScore(night?.sleep_score?.score, label: "Sleep", color: Obs.sleepAccent)
+                dayScore(night?.readiness?.score ?? s.imported_history[day]?.readiness,
+                         label: "Ready", color: Obs.readinessAccent)
+                dayScore(night?.mainSleepScore?.score ?? s.imported_history[day]?.sleep_score,
+                         label: "Sleep", color: Obs.sleepAccent)
             }
             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
         }
@@ -898,7 +900,7 @@ struct RootView: View {
         .sheet(isPresented: $showSync) {
             SyncView(ring: ring, onSynced: refreshAfterSync, onReset: resetAndReload)
         }
-        .sheet(isPresented: $showProfile) { ProfileSettingsView(profile: s?.profile, onSaved: refreshDerivedData) }
+        .sheet(isPresented: $showProfile) { ProfileSettingsView(profile: s?.profile, ouraImport: s?.oura_import, onSaved: refreshDerivedData) }
         .sheet(isPresented: $showSleepDebt) { if let debt = s?.sleepDebt { SleepDebtDetail(debt: debt) } }
         .sheet(item: $vital) { kind in if let s { VitalTrendView(s: s, kind: kind) } }
         #if TORCH
@@ -1165,8 +1167,8 @@ struct RootView: View {
                     }
                     Spacer()
                     Button { tab = .sleep } label: {
-                        ScoreRing(value: night?.sleep_score.map { "\(Int($0.score))" } ?? "–", caption: "sleep",
-                                  progress: night?.sleep_score.map { $0.score / 100 }, accent: Obs.sleepAccent)
+                        ScoreRing(value: night?.mainSleepScore.map { "\(Int($0.score))" } ?? "–", caption: "sleep",
+                                  progress: night?.mainSleepScore.map { $0.score / 100 }, accent: Obs.sleepAccent)
                     }
                     Spacer()
                     Button { tab = .activity } label: {
@@ -1315,8 +1317,8 @@ struct RootView: View {
 
     private func sleepHero(_ n: NightRow) -> some View {
         HStack(spacing: 20) {
-            ScoreRing(value: n.sleep_score.map { "\(Int($0.score))" } ?? "–", caption: "sleep score",
-                      progress: n.sleep_score.map { $0.score / 100 }, accent: Obs.sleepAccent, size: 108, lineWidth: 10)
+            ScoreRing(value: n.mainSleepScore.map { "\(Int($0.score))" } ?? "–", caption: "sleep score",
+                      progress: n.mainSleepScore.map { $0.score / 100 }, accent: Obs.sleepAccent, size: 108, lineWidth: 10)
             VStack(alignment: .leading, spacing: 10) {
                 heroStat("Time in bed", Fmt.duration(seconds: n.durationS))
                 heroStat("Efficiency", n.efficiency.map { "\(Int($0))%" })

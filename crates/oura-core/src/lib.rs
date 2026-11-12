@@ -44,6 +44,29 @@ pub fn summary_json(db_path: String, tz_offset: i64) -> String {
     }
 }
 
+/// Import an Oura account trends export (the CSV's text). Fits the score
+/// calibration on this device and keeps the daily history, both in
+/// `oura_export.json` next to the database. Returns
+/// `{days, first, last, calibrated: {sleep, readiness}, calibration_days}`, or
+/// `{ "error": "…" }` naming the columns found when the file isn't recognised.
+#[uniffi::export]
+pub fn import_oura_export(db_path: String, csv_text: String) -> String {
+    match oura_summary::oura_export::import(std::path::Path::new(&db_path), &csv_text) {
+        Ok(v) => v.to_string(),
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
+/// Remove an imported Oura export (history and calibration). Returns `{}` or
+/// `{ "error": "…" }`.
+#[uniffi::export]
+pub fn clear_oura_export(db_path: String) -> String {
+    match oura_summary::oura_export::clear(std::path::Path::new(&db_path)) {
+        Ok(()) => "{}".to_string(),
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
 /// Hourly heart-rate bars for the HR detail screen — one bar per local-clock
 /// hour, `{low, high, mean, count}`, plus the newest quality-gated
 /// reading as `latest`.
