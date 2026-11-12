@@ -73,6 +73,9 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
     private let nameContains: String
     private let preferredPeripheralID: UUID?
     private let excludedPeripheralIDs: Set<UUID>
+    /// A sync iOS started in the background: iOS only reports scans that name the
+    /// service they look for, so the unfiltered scan below would see nothing.
+    private let background: Bool
     private var scanStartedAt: Date?
 
 
@@ -112,10 +115,12 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
 
     init(nameContains: String = "Oura",
          preferredPeripheralID: UUID? = nil,
-         excludedPeripheralIDs: Set<UUID> = []) {
+         excludedPeripheralIDs: Set<UUID> = [],
+         background: Bool = false) {
         self.nameContains = nameContains
         self.preferredPeripheralID = preferredPeripheralID
         self.excludedPeripheralIDs = excludedPeripheralIDs
+        self.background = background
         super.init()
         // CoreBluetooth requires a SERIAL queue for delegate callbacks; a concurrent
         // global queue can deliver them out of order (e.g. a notify confirmation
@@ -237,7 +242,7 @@ final class BLETransport: NSObject, RingTransport, CBCentralManagerDelegate, CBP
         // scan response, which a worn ring in low-power mode answers lazily. Without
         // duplicates iOS may coalesce the ring into a single early, name-less report.
         central.scanForPeripherals(
-            withServices: nil,
+            withServices: background ? [RingUUID.service] : nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
     }
 

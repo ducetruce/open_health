@@ -397,6 +397,10 @@ struct Summary: Codable {
         oura_import = try? c.decodeIfPresent(OuraImportInfo.self, forKey: .oura_import)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
     }
+    /// Ring days plus days only known from an imported Oura export, newest first.
+    var allBrowsableDays: [String] {
+        Array(Set(days).union(imported_history.keys)).sorted(by: >)
+    }
     /// recent days (newest first) that have a movement profile.
     var activeDays: [String] { activity_profile.keys.sorted(by: >) }
 }

@@ -246,7 +246,19 @@ enum Keychain {
         SecItemDelete(base as CFDictionary)
         var add = base
         add[kSecValueData as String] = data
+        // Readable while the phone is locked (after the first unlock since boot), so a
+        // background sync can authenticate. Never leaves this device or its backups.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(add as CFDictionary, nil)
+    }
+
+    /// Older installs stored the key as "when unlocked" only. Re-save it with the
+    /// background-friendly accessibility once, while the phone is unlocked.
+    static func migrateAccessibilityIfNeeded() {
+        let flag = "keychain.accessibility-migrated"
+        guard !UserDefaults.standard.bool(forKey: flag), let key = loadKey() else { return }
+        saveKey(key)
+        UserDefaults.standard.set(true, forKey: flag)
     }
     static func clearKey() {
         SecItemDelete([kSecClass as String: kSecClassGenericPassword,
@@ -309,6 +321,9 @@ final class SyncProgressBridge: SyncProgressListener, @unchecked Sendable {
 /// Orchestrates a sync and exposes progress to the UI.
 @MainActor
 final class RingSync: ObservableObject {
+    /// One instance for the UI and for background syncs launched by iOS.
+    static let shared = RingSync()
+
     @Published var status: String = ""
     @Published var busy = false
     @Published private(set) var exportStatus: String?
@@ -342,6 +357,17 @@ final class RingSync: ObservableObject {
     private var progressLogAt = 0.0
     private var progressStage = ""
     private var lifecycleObservers: [NSObjectProtocol] = []
+    /// True while a sync started by iOS in the background is running: it may keep
+    /// working while the app isn't on screen, as long as the phone has been unlocked
+    /// since it booted.
+    private var backgroundRun = false
+
+    /// Whether a sync may run right now: on screen, or a background run with the
+    /// phone's data available.
+    private var canWork: Bool {
+        WorkCoordinator.shared.available
+            || (backgroundRun && UIApplication.shared.isProtectedDataAvailable)
+    }
 
     func pause() {
         paused = true
@@ -363,7 +389,7 @@ final class RingSync: ObservableObject {
         for name in [UIApplication.didEnterBackgroundNotification, UIApplication.protectedDataWillBecomeUnavailableNotification] {
             lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
-                    guard let self, self.busy else { return }
+                    guard let self, self.busy, !self.backgroundRun else { return }
                     WorkCoordinator.shared.beginCleanup()
                     self.pause()
                 }
@@ -399,6 +425,32 @@ final class RingSync: ObservableObject {
         return await run(keyHex: key,
                          maxAttempts: resuming ? 3 : 1,
                          source: resuming ? "resume" : "automatic")
+    }
+
+    /// Minimum gap between background syncs.
+    static let backgroundSyncInterval: TimeInterval = 45 * 60
+
+    /// A sync started by iOS while the app is in the background (see
+    /// `BackgroundSync`). Connects straight to the remembered ring, drains whatever
+    /// is new, and checkpoints after every batch, so a run cut short by iOS keeps
+    /// what it got and the next run continues from there.
+    func syncInBackground(now: Date = Date()) async -> SyncReport? {
+        guard !busy, UIApplication.shared.isProtectedDataAvailable,
+              let key = Keychain.loadKey(), preferredPeripheralID != nil else { return nil }
+        if !hasIncompleteSync, let successful = lastSuccessfulSyncAt,
+           now.timeIntervalSince(successful) < Self.backgroundSyncInterval {
+            return nil
+        }
+        backgroundRun = true
+        defer { backgroundRun = false }
+        dlog("sync", "background sync starting")
+        return await run(keyHex: key, maxAttempts: 2, source: "background")
+    }
+
+    /// Stop a background run because iOS is about to suspend the app.
+    func stopBackgroundSync() {
+        guard backgroundRun else { return }
+        pause()
     }
 
     func resetLocalDatabase() async -> Bool {
@@ -634,13 +686,13 @@ final class RingSync: ObservableObject {
             status = "Key must be 32 hex characters"
             return nil
         }
-        guard WorkCoordinator.shared.available else { status = "Sync paused. Open the app to resume."; return nil }
+        guard canWork else { status = "Sync paused. Open the app to resume."; return nil }
         busy = true
         paused = false
         WorkCoordinator.shared.invalidateAnalysis()
         await WorkGate.shared.acquire()
         defer { Task { await WorkGate.shared.release() }; WorkCoordinator.shared.endCleanup() }
-        guard !paused, WorkCoordinator.shared.available else { busy = false; return nil }
+        guard !paused, canWork else { busy = false; return nil }
         markedIncompleteThisRun = false
         // A multi-hour first sync must not die because the screen locked; SyncView
         // refreshes this when the app becomes active again.
@@ -666,7 +718,7 @@ final class RingSync: ObservableObject {
         var attempt = 1
         var totalBudget = max(1, maxAttempts)
         while attempt <= totalBudget {
-            if paused || Task.isCancelled || !WorkCoordinator.shared.available { status = "Sync paused. Return to the app to resume."; return nil }
+            if paused || Task.isCancelled || !canWork { status = "Sync paused. Return to the app to resume."; return nil }
             attemptID = UUID().uuidString
             dlog("sync", "attempt=\(attempt) id=\(attemptID) run=\(runID)")
             if attempt > 1 {
@@ -676,7 +728,7 @@ final class RingSync: ObservableObject {
                     status = "Connection lost. Retrying (\(attempt) of \(totalBudget))…"
                 }
                 do { try await Task.sleep(nanoseconds: delayNs) } catch { return nil }
-                guard !paused, WorkCoordinator.shared.available else { return nil }
+                guard !paused, canWork else { return nil }
             }
 
             if excludedPeripherals.isEmpty {
@@ -687,7 +739,8 @@ final class RingSync: ObservableObject {
             // BLETransport's notification stream is per-connection.
             let t = BLETransport(nameContains: "Oura",
                                  preferredPeripheralID: preferredPeripheralID,
-                                 excludedPeripheralIDs: excludedPeripherals)
+                                 excludedPeripheralIDs: excludedPeripherals,
+                                 background: backgroundRun)
             transport = t
             do {
                 try await t.connect()

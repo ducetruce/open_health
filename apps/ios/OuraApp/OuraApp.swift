@@ -103,13 +103,18 @@ struct AllDaysView: View {
                 Obs.canvas.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(groups(s.days), id: \.title) { group in
+                        ForEach(groups(s.allBrowsableDays), id: \.title) { group in
                             Text(group.title.uppercased()).font(Obs.mono(10, .medium)).tracking(1.4)
                                 .foregroundStyle(Obs.muted)
                                 .padding(.top, 22).padding(.bottom, 8)
                             ForEach(group.days, id: \.self) { day in
-                                NavigationLink { DayReportView(s: s, day: day, tab: .sleep) } label: { row(s, day) }
-                                    .buttonStyle(.plain)
+                                if s.days.contains(day) {
+                                    NavigationLink { DayReportView(s: s, day: day, tab: .sleep) } label: { row(s, day) }
+                                        .buttonStyle(.plain)
+                                } else if let entry = s.imported_history[day] {
+                                    NavigationLink { ImportedDayView(day: day, entry: entry) } label: { importedRow(day, entry) }
+                                        .buttonStyle(.plain)
+                                }
                                 if day != group.days.last { Rectangle().fill(Obs.rule).frame(height: 1) }
                             }
                         }
@@ -121,6 +126,38 @@ struct AllDaysView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
+    }
+
+    /// A day from an imported Oura export: Oura's own daily figures, no ring detail.
+    @ViewBuilder private func importedRow(_ day: String, _ e: ImportedDay) -> some View {
+        let date = Self.ymd.date(from: day)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
+                    .font(Obs.mono(9)).tracking(0.8).foregroundStyle(Obs.muted)
+                Text(String(day.suffix(2))).font(Obs.mono(17, .medium)).foregroundStyle(Obs.ink).monospacedDigit()
+            }
+            .frame(width: 36, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(Fmt.duration(seconds: e.asleep_s))
+                        .font(Obs.mono(12, .medium)).foregroundStyle(e.asleep_s == nil ? Obs.muted : Obs.ink)
+                    if let steps = e.steps {
+                        Text("·").foregroundStyle(Obs.trace)
+                        Text("\(Fmt.count(steps)) steps").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                    }
+                }
+                Text("From your Oura history").font(Obs.mono(10)).foregroundStyle(Obs.muted)
+            }
+            Spacer(minLength: 4)
+            HStack(spacing: 10) {
+                dayScore(e.readiness, label: "Ready", color: Obs.readinessAccent)
+                dayScore(e.sleep_score, label: "Sleep", color: Obs.sleepAccent)
+            }
+            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
+        }
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
     }
 
     /// A day's score with a tiny caption, or a dash when there isn't one.
@@ -842,7 +879,7 @@ struct RootView: View {
     @State private var isRefreshingSummary = false
     @State private var automaticSyncRequested = false
     @State private var reloadPending = false
-    @StateObject private var ring = RingSync()
+    @ObservedObject private var ring = RingSync.shared
     @StateObject private var modelProgress = ModelProgress()
     @ObservedObject private var workouts = WorkoutStore.shared
     /// Redraws every screen when a display unit changes.
@@ -917,9 +954,11 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                Keychain.migrateAccessibilityIfNeeded()
                 requestAutomaticSync()
             } else if phase == .background {
                 WorkCoordinator.shared.invalidateAnalysis()
+                BackgroundSync.schedule()
             }
         }
     }
@@ -1549,6 +1588,7 @@ struct BuildStamp: View {
 struct OuraApp: App {
     init() {
         DiagStore.shared.bootstrap()
+        BackgroundSync.register()
         // Dark, slightly translucent bars to sit on the night-sky canvas.
         let tabs = UITabBarAppearance()
         tabs.configureWithDefaultBackground()
@@ -1564,4 +1604,52 @@ struct OuraApp: App {
         UINavigationBar.appearance().scrollEdgeAppearance = nav
     }
     var body: some Scene { WindowGroup { RootView() } }
+}
+
+/// One day from an imported Oura export. The export holds Oura's daily figures only,
+/// not the ring's raw signals, so there is no hypnogram or heart-rate curve to draw.
+struct ImportedDayView: View {
+    let day: String
+    let entry: ImportedDay
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 20) {
+                    ScoreRing(value: entry.readiness.map { "\(Int($0))" } ?? "–", caption: "readiness",
+                              progress: entry.readiness.map { $0 / 100 }, accent: Obs.readinessAccent)
+                    ScoreRing(value: entry.sleep_score.map { "\(Int($0))" } ?? "–", caption: "sleep",
+                              progress: entry.sleep_score.map { $0 / 100 }, accent: Obs.sleepAccent)
+                    ScoreRing(value: entry.activity_score.map { "\(Int($0))" } ?? "–", caption: "activity",
+                              progress: entry.activity_score.map { $0 / 100 }, accent: Obs.activityAccent)
+                }
+                .frame(maxWidth: .infinity)
+                .obsCard(padding: 20)
+                VStack(spacing: 10) {
+                    stat("Time asleep", entry.asleep_s.map { Fmt.duration(seconds: $0) })
+                    stat("Lowest heart rate", entry.rhr.map { "\(Int($0.rounded())) bpm" })
+                    stat("HRV", entry.hrv_ms.map { "\(Int($0.rounded())) ms" })
+                    stat("Breathing rate", entry.breath_rate.map { String(format: "%.1f /min", $0) })
+                    stat("Temperature vs usual", entry.temp_deviation.map {
+                        let unit = UnitSettings.shared.temperature
+                        return "\(Fmt.temperatureDelta($0, unit)) \(unit.symbol)"
+                    })
+                    stat("Steps", entry.steps.map { Fmt.count($0) })
+                    stat("Active calories", entry.active_kcal.map { "\(Fmt.count($0)) kcal" })
+                }
+                .obsCard()
+                Text("This day comes from your Oura export, which has Oura's daily figures but not the ring's minute-by-minute data, so there's no sleep-stage or heart-rate chart for it.")
+                    .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(20)
+        }
+        .background(Obs.canvas.ignoresSafeArea())
+        .navigationTitle(Fmt.day(day))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder private func stat(_ label: String, _ value: String?) -> some View {
+        if let value { ObsStat(label: label, value: value) }
+    }
 }

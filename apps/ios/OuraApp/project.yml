@@ -86,6 +86,7 @@ targets:
       - path: Theme.swift
       - path: Units.swift
       - path: TrendsView.swift
+      - path: BackgroundSync.swift
       - path: BLETransport.swift
       - path: RingSync.swift
       - path: ProfileSettings.swift
