@@ -183,6 +183,19 @@ client re-derives packet timing at all — tracked as a follow-up.
 
 ## Known gaps (iOS-only, not yet on the web)
 
+- **Readiness score** (`nights[].readiness`, `oura-summary/src/readiness.rs`): in the
+  summary JSON for both clients, rendered only on iOS (Today rings, readiness card, Trends,
+  All days). The web dashboard does not show it yet.
+- **Oura export import** (`oura-summary/src/oura_export.rs`, FFI `import_oura_export` /
+  `clear_oura_export`): calibrated `nights[].oura_sleep_score` and calibrated readiness,
+  plus `imported_history` / `oura_import`. Import UI and rendering are iOS-only (Profile →
+  Oura history); the web has no import button.
+- **Trends tab** (iOS `TrendsView.swift`): every metric over week / month / 3 months / year /
+  all, period averages, change vs the previous period, weekly/monthly aggregation.
+- **Display units** (iOS `Units.swift`): height, weight, temperature and distance units;
+  the web still shows metric.
+- **Direct reconnect** (iOS `BLETransport.startConnecting`): opens the ring iOS is already
+  connected to, or the remembered one by identifier, before scanning. Desktop BLE unchanged.
 - **Workout tracking** (iOS): start/stop a workout with a live timer, log a past one, edit
   or delete it, and rule-based detection of sustained movement (≥3 MET for ≥10 min,
   pauses ≤3 min) for builds without the AAD model. Numbers for any workout window come
