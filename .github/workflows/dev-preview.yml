@@ -70,12 +70,14 @@ jobs:
             xcrun simctl io "$UDID" screenshot "shots/$name.png"
           }
           DEMO_FLAGS="" shot 1-today -tab today
-          DEMO_FLAGS="" shot 2-sleep -tab sleep
-          DEMO_FLAGS="" shot 3-activity -tab activity
-          DEMO_FLAGS="" shot 4-vitals -tab vitals
-          DEMO_FLAGS="--active" shot 5-activity-live -tab activity
-          DEMO_FLAGS="" shot 6-log-workout -tab activity -logWorkout
-          DEMO_FLAGS="" shot 7-ring -openSync
+          DEMO_FLAGS="" shot 2-today-readiness -tab today -expandReadiness
+          DEMO_FLAGS="" shot 3-sleep -tab sleep
+          DEMO_FLAGS="" shot 4-activity -tab activity
+          DEMO_FLAGS="" shot 5-trends -tab trends
+          DEMO_FLAGS="" shot 6-vitals -tab vitals
+          DEMO_FLAGS="" shot 7-profile -openProfile
+          DEMO_FLAGS="" shot 8-all-days -openAllDays
+          DEMO_FLAGS="" shot 9-ring -openSync
 
       - name: Publish to preview branch
         if: always()

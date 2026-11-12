@@ -46,7 +46,7 @@ def hypnogram(n):
 
 
 nights, days = [], []
-for k in range(12, -1, -1):
+for k in range(99, -1, -1):
     wake = today - timedelta(days=k)
     bed = wake - timedelta(days=1)
     start_h, start_m = 23, rng.randint(0, 50)
@@ -76,7 +76,7 @@ for k in range(12, -1, -1):
             ],
         },
         # The first few nights have no baseline yet, like a fresh install.
-        "readiness": None if k > 9 else {
+        "readiness": None if k > 96 else {
             "score": score - 4, "basis": "estimate", "provisional": True,
             "components": [
                 {"key": "resting_hr", "score": min(100, score + 6), "weight": 0.21},
@@ -91,7 +91,7 @@ for k in range(12, -1, -1):
 nights.reverse()  # newest first, like the summary
 
 profile, daily = {}, {}
-for k in range(13):
+for k in range(100):
     d = today - timedelta(days=k)
     days.append(ymd(d))
     hours_done = now.hour + now.minute / 60 if k == 0 else 24

@@ -89,7 +89,7 @@ struct AllDaysView: View {
     private func groups(_ days: [String]) -> [(title: String, days: [String])] {
         var out: [(String, [String])] = []
         for day in days {
-            let title = Self.ymd.date(from: day).map { Self.month.string(from: $0) } ?? "undated"
+            let title = Self.ymd.date(from: day).map { Self.month.string(from: $0) } ?? "Undated"
             if let last = out.last, last.0 == title { out[out.count - 1].1.append(day) }
             else { out.append((title, [day])) }
         }
@@ -121,6 +121,17 @@ struct AllDaysView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
+    }
+
+    /// A day's score with a tiny caption, or a dash when there isn't one.
+    private func dayScore(_ value: Double?, label: String, color: Color) -> some View {
+        VStack(spacing: 1) {
+            Text(value.map { "\(Int($0))" } ?? "–")
+                .font(Obs.mono(15, .semibold)).foregroundStyle(value == nil ? Obs.muted : color)
+            Text(label.uppercased()).font(.system(size: 8, weight: .semibold)).tracking(0.6)
+                .foregroundStyle(Obs.muted)
+        }
+        .frame(minWidth: 34)
     }
 
     @ViewBuilder private func row(_ s: Summary, _ day: String) -> some View {
@@ -156,6 +167,10 @@ struct AllDaysView: View {
                 }
             }
             Spacer(minLength: 4)
+            HStack(spacing: 10) {
+                dayScore(night?.readiness?.score, label: "Ready", color: Obs.readinessAccent)
+                dayScore(night?.sleep_score?.score, label: "Sleep", color: Obs.sleepAccent)
+            }
             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
         }
         .padding(.vertical, 11)
@@ -800,11 +815,14 @@ struct RootView: View {
         let args = CommandLine.arguments
         if args.contains("-openSync") { showSync = true }
         if args.contains("-openAllDays") { showAllDays = true }
+        if args.contains("-openProfile") { showProfile = true }
+        if args.contains("-expandReadiness") { readinessExpanded = true }
         if let index = args.firstIndex(of: "-tab"), index + 1 < args.count {
             switch args[index + 1] {
             case "sleep": tab = .sleep
             case "activity": tab = .activity
             case "vitals": tab = .vitals
+            case "trends": tab = .trends
             default: tab = .today
             }
         }
@@ -1074,6 +1092,10 @@ struct RootView: View {
             }
             .background(Obs.canvas)
             .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity)
+            TrendsTab(s: s) {
+                AppHeader(title: "Trends", subtitle: busyLabel) { headerButtons }
+            }
+            .tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag(AppTab.trends)
             tabPage { vitalsTab(s) }
                 .tabItem { Label("Vitals", systemImage: "heart.text.square.fill") }.tag(AppTab.vitals)
         }
@@ -1465,7 +1487,7 @@ struct RootView: View {
     }
 }
 
-enum AppTab: Hashable { case today, sleep, activity, vitals }
+enum AppTab: Hashable { case today, sleep, activity, trends, vitals }
 
 /// Which build is actually on this phone. A sideloaded app has no App Store version
 /// to compare against, and a failed install looks exactly like a successful one — so
