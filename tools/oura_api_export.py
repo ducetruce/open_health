@@ -96,6 +96,12 @@ def login(redirect_uri):
     client_id = "".join(input("Client ID: ").split())
     client_secret = "".join(getpass.getpass("Client secret (hidden as you type): ").split())
     typed = input(f"Redirect URI exactly as it appears on your application [{redirect_uri}]: ").strip()
+    # Accept the application page's whole "example authorization URL" too: the
+    # redirect address is its redirect_uri parameter.
+    pasted = urllib.parse.parse_qs(urllib.parse.urlparse(typed).query).get("redirect_uri")
+    if pasted:
+        typed = pasted[0]
+        print(f"   Using the redirect URI from that link: {typed}", file=sys.stderr)
     redirect_uri = typed or redirect_uri
     state = base64.urlsafe_b64encode(os.urandom(12)).decode().rstrip("=")
     # PKCE: optional for Oura, harmless, and required by some newer OAuth setups.
