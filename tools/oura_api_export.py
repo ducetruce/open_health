@@ -7,26 +7,26 @@ crates/oura-summary/src/oura_export.rs) read: Oura's daily scores, every sleep a
 readiness contributor sub-score, and the raw metrics behind them. Importing it fits
 the scores to Oura's scale and adds your history from before the app.
 
-Authentication: Oura retired personal access tokens in December 2025. Get a token
-with the OAuth2 client-side flow (an access token valid for 30 days):
+Authentication: Oura retired personal access tokens in December 2025, so this uses
+the OAuth2 authorization-code flow, run entirely on your computer:
 
-  1. Create an application at https://cloud.ouraring.com/oauth/applications with a
-     redirect URI you control, for example https://example.com/oura (it never has to
-     load: you only read the token out of the address bar).
-  2. Open, with your client id filled in:
-     https://cloud.ouraring.com/oauth/authorize?response_type=token&client_id=CLIENT_ID&scope=daily
-  3. Approve. The browser is sent to the redirect URI with #access_token=... in the
-     address; that value is the token.
+  1. Create an application at https://cloud.ouraring.com/oauth/applications with the
+     redirect URI https://example.com/oura (it never has to load).
+  2. Run:  python3 tools/oura_api_export.py --out oura_trends.csv
+     It asks for the app's client ID and secret, prints a link to open, and asks you
+     to paste back the address you land on (https://example.com/oura?code=...).
+     It then exchanges that code for a token and downloads everything.
 
-Then:  OURA_TOKEN=... python3 tools/oura_api_export.py --out oura_trends.csv
-(Inside a session whose network proxy injects the token, any OURA_TOKEN value works.)
+A token you already have can be given as OURA_TOKEN instead.
 --sandbox reads Oura's public sandbox data instead, for testing.
 
 Your health data only goes to the file you name. Never commit it.
 """
 import argparse
+import base64
 import csv
 import datetime as dt
+import getpass
 import json
 import os
 import sys
@@ -78,6 +78,49 @@ COLUMNS = (
     + list(READINESS_CONTRIBUTORS.values())
     + list(ACTIVITY_CONTRIBUTORS.values())
 )
+
+
+AUTHORIZE_URL = "https://cloud.ouraring.com/oauth/authorize"
+TOKEN_URL = "https://api.ouraring.com/oauth/token"
+DEFAULT_REDIRECT = "https://example.com/oura"
+
+
+def login(redirect_uri):
+    """Authorization-code sign-in: returns an access token for your own account."""
+    print("Sign in to Oura (your application's details are at "
+          "https://cloud.ouraring.com/oauth/applications).", file=sys.stderr)
+    client_id = input("Client ID: ").strip()
+    client_secret = getpass.getpass("Client secret (hidden as you type): ").strip()
+    state = base64.urlsafe_b64encode(os.urandom(12)).decode().rstrip("=")
+    url = AUTHORIZE_URL + "?" + urllib.parse.urlencode({
+        "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
+        "scope": "daily", "state": state})
+    print("\n1. Open this link and approve access:\n\n   " + url + "\n", file=sys.stderr)
+    print(f"2. Your browser then goes to {redirect_uri}?code=... (the page itself may not"
+          " load; that's fine).", file=sys.stderr)
+    landed = input("   Paste that whole address here: ").strip()
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(landed).query)
+    if "error" in query:
+        sys.exit(f"Oura said: {query['error'][0]}")
+    if query.get("state", [state])[0] != state:
+        sys.exit("that address is from a different sign-in attempt; run the script again")
+    code = (query.get("code") or [landed if "://" not in landed else ""])[0]
+    if not code:
+        sys.exit("no ?code= in that address")
+    body = urllib.parse.urlencode({
+        "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
+        "client_id": client_id, "client_secret": client_secret}).encode()
+    req = urllib.request.Request(TOKEN_URL, data=body, headers={
+        "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            reply = json.load(r)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"token exchange failed: HTTP {e.code} {e.read().decode('utf-8', 'replace')[:300]}\n"
+                 "Check the client secret and that the redirect URI on your application is exactly "
+                 + redirect_uri)
+    print("Signed in.\n", file=sys.stderr)
+    return reply["access_token"]
 
 
 def fetch(collection, start, end, token, sandbox):
@@ -189,11 +232,13 @@ def main():
     ap.add_argument("--start", default="2015-01-01", help="first day (YYYY-MM-DD)")
     ap.add_argument("--end", default=dt.date.today().isoformat(), help="last day (YYYY-MM-DD)")
     ap.add_argument("--sandbox", action="store_true", help="use Oura's public sandbox data")
+    ap.add_argument("--redirect-uri", default=DEFAULT_REDIRECT,
+                    help="the redirect URI registered on your Oura application")
     args = ap.parse_args()
 
     token = os.environ.get("OURA_TOKEN") or ("sandbox" if args.sandbox else None)
     if not token:
-        sys.exit("set OURA_TOKEN (see the instructions at the top of this file)")
+        token = login(args.redirect_uri)
     start = dt.date.fromisoformat(args.start)
     # Oura's end_date is exclusive: ask for one day more so the last day is included.
     end = dt.date.fromisoformat(args.end) + dt.timedelta(days=1)
