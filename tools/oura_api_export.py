@@ -82,6 +82,9 @@ COLUMNS = (
 
 
 AUTHORIZE_URL = "https://cloud.ouraring.com/oauth/authorize"
+# Oura's documented authorize URL "for new OAuth clients". Newer applications get
+# UUID-style client IDs, and the classic URL answers them with 400 invalid request.
+NEW_CLIENT_AUTHORIZE_URL = "https://developer.ouraring.com/authorize"
 TOKEN_URL = "https://api.ouraring.com/oauth/token"
 DEFAULT_REDIRECT = "https://example.com/oura"
 
@@ -98,11 +101,16 @@ def login(redirect_uri):
     # PKCE: optional for Oura, harmless, and required by some newer OAuth setups.
     verifier = base64.urlsafe_b64encode(os.urandom(48)).decode().rstrip("=")
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-    url = AUTHORIZE_URL + "?" + urllib.parse.urlencode({
+    query = urllib.parse.urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
         "scope": "daily", "state": state,
         "code_challenge": challenge, "code_challenge_method": "S256"})
-    print("\n1. Open this link and approve access:\n\n   " + url + "\n", file=sys.stderr)
+    new_style = "-" in client_id
+    first, second = ((NEW_CLIENT_AUTHORIZE_URL, AUTHORIZE_URL) if new_style
+                     else (AUTHORIZE_URL, NEW_CLIENT_AUTHORIZE_URL))
+    print("\n1. Open this link and approve access:\n\n   " + first + "?" + query + "\n", file=sys.stderr)
+    print("   If that page shows an error, use this one instead:\n\n   "
+          + second + "?" + query + "\n", file=sys.stderr)
     print(f"2. Your browser then goes to {redirect_uri}?code=... (the page itself may not"
           " load; that's fine).", file=sys.stderr)
     landed = input("   Paste that whole address here: ").strip()
