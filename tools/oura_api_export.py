@@ -27,6 +27,7 @@ import base64
 import csv
 import datetime as dt
 import getpass
+import hashlib
 import json
 import os
 import sys
@@ -89,12 +90,18 @@ def login(redirect_uri):
     """Authorization-code sign-in: returns an access token for your own account."""
     print("Sign in to Oura (your application's details are at "
           "https://cloud.ouraring.com/oauth/applications).", file=sys.stderr)
-    client_id = input("Client ID: ").strip()
-    client_secret = getpass.getpass("Client secret (hidden as you type): ").strip()
+    client_id = "".join(input("Client ID: ").split())
+    client_secret = "".join(getpass.getpass("Client secret (hidden as you type): ").split())
+    typed = input(f"Redirect URI exactly as it appears on your application [{redirect_uri}]: ").strip()
+    redirect_uri = typed or redirect_uri
     state = base64.urlsafe_b64encode(os.urandom(12)).decode().rstrip("=")
+    # PKCE: optional for Oura, harmless, and required by some newer OAuth setups.
+    verifier = base64.urlsafe_b64encode(os.urandom(48)).decode().rstrip("=")
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     url = AUTHORIZE_URL + "?" + urllib.parse.urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri,
-        "scope": "daily", "state": state})
+        "scope": "daily", "state": state,
+        "code_challenge": challenge, "code_challenge_method": "S256"})
     print("\n1. Open this link and approve access:\n\n   " + url + "\n", file=sys.stderr)
     print(f"2. Your browser then goes to {redirect_uri}?code=... (the page itself may not"
           " load; that's fine).", file=sys.stderr)
@@ -109,7 +116,8 @@ def login(redirect_uri):
         sys.exit("no ?code= in that address")
     body = urllib.parse.urlencode({
         "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
-        "client_id": client_id, "client_secret": client_secret}).encode()
+        "client_id": client_id, "client_secret": client_secret,
+        "code_verifier": verifier}).encode()
     req = urllib.request.Request(TOKEN_URL, data=body, headers={
         "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT})
     try:
