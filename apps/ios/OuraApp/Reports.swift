@@ -763,9 +763,11 @@ struct Polysomnograph: View {
         sig("HRV", "ms", s?.hrv, Obs.chart, rawTimed: st?.hrv)
         sig("Blood O₂", "%", s?.spo2, Obs.chart, rawTimed: st?.spo2)
         let tempUnit = UnitSettings.shared.temperature
-        sig("Skin temp", tempUnit.symbol, s?.temp.map { $0.map { Convert.temperature($0, tempUnit) } },
+        // Optional chaining makes `.map` here Array.map: one reading (or [unix, value]
+        // pair) at a time.
+        sig("Skin temp", tempUnit.symbol, s?.temp.map { Convert.temperature($0, tempUnit) },
             Obs.chart, 1, span: s?.temp_span,
-            rawTimed: st?.temp.map { $0.map { p in p.count > 1 ? [p[0], Convert.temperature(p[1], tempUnit)] + p.dropFirst(2) : p } })
+            rawTimed: st?.temp.map { p in p.count > 1 ? [p[0], Convert.temperature(p[1], tempUnit)] + p.dropFirst(2) : p })
         // Prefer timestamped motion (`series_t.motion`), falling back to `series.motion_time`.
         // Legacy exports lost motion timestamps; do not invent their positions.
         if let timedMotion = Sleep.timedSamples(st?.motion, startUnix: night.start_unix, endUnix: night.end_unix),
