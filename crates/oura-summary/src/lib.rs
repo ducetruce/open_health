@@ -556,6 +556,10 @@ struct Night {
     // timestamped twins of `spo2`/`temp`/`motion` for the time-true `series_t` lanes;
     // samples packed in one event sit at that event's time.
     spo2_t: Vec<(i64, f64)>,
+    /// SpO2 % the ring reported directly (`spo2_event`), used only for a night with
+    /// no `spo2_r_pi_event` ratios, so the two never double-count.
+    spo2_direct: Vec<f64>,
+    spo2_direct_t: Vec<(i64, f64)>,
     temp_t: Vec<(i64, f64)>,
     motion_t: Vec<(i64, f64)>,
     /// Respiratory rate, breaths per minute, from the ring's own per-window estimate
@@ -2458,6 +2462,17 @@ pub fn build_summary(
                     nights[idx].spo2.extend(pcts);
                 }
             }
+            "spo2_event" => {
+                if let Some(a) = v["spo2_percent"].as_array() {
+                    let pcts: Vec<f64> = a
+                        .iter()
+                        .filter_map(|x| x.as_f64())
+                        .filter(|p| (70.0..=100.0).contains(p))
+                        .collect();
+                    nights[idx].spo2_direct_t.extend(pcts.iter().map(|&p| (*ds, p)));
+                    nights[idx].spo2_direct.extend(pcts);
+                }
+            }
             "motion_event" => {
                 // seconds of motion in this window — a restlessness signal aligned to
                 // the night, feeds the polysomnograph's movement lane.
@@ -2467,6 +2482,13 @@ pub fn build_summary(
                 }
             }
             _ => {}
+        }
+    }
+
+    for nt in nights.iter_mut() {
+        if nt.spo2.is_empty() && !nt.spo2_direct.is_empty() {
+            nt.spo2 = std::mem::take(&mut nt.spo2_direct);
+            nt.spo2_t = std::mem::take(&mut nt.spo2_direct_t);
         }
     }
 
@@ -3121,7 +3143,7 @@ pub fn build_summary(
             ),
             "daytime_hr"
         ),
-        feat("SpO2", cap_on("spo2", has("spo2_r_pi_event")), "spo2"),
+        feat("SpO2", cap_on("spo2", has("spo2_r_pi_event") || has("spo2_event")), "spo2"),
         feat(
             "Exercise HR",
             cap_on("exercise_hr", has("ehr_trace_event")),
@@ -3188,7 +3210,7 @@ pub fn build_summary(
             has("cva_raw_ppg_data"),
             "enable cva_ppg"
         ),
-        insight("SpO2", has("spo2_r_pi_event"), "enable spo2"),
+        insight("SpO2", has("spo2_r_pi_event") || has("spo2_event"), "enable spo2"),
         insight("Activity sessions", true, ""),
         insight("HRV / resting HR", true, ""),
         insight(

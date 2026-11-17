@@ -633,7 +633,7 @@ public protocol RingSessionProtocol : AnyObject {
      * The drain checkpoints its cursor after every batch, so a failed call can be
      * retried (reconnect + call again) and resumes where it left off.
      */
-    func sync(dbPath: String, keyHex: String, progress: SyncProgressListener) async throws  -> SyncReport
+    func sync(dbPath: String, keyHex: String, spo2: Bool?, progress: SyncProgressListener) async throws  -> SyncReport
     
 }
 
@@ -788,13 +788,13 @@ open func pushFrame(data: Data) {try! rustCall() {
      * The drain checkpoints its cursor after every batch, so a failed call can be
      * retried (reconnect + call again) and resumes where it left off.
      */
-open func sync(dbPath: String, keyHex: String, progress: SyncProgressListener)async throws  -> SyncReport {
+open func sync(dbPath: String, keyHex: String, spo2: Bool?, progress: SyncProgressListener)async throws  -> SyncReport {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_oura_core_fn_method_ringsession_sync(
                     self.uniffiClonePointer(),
-                    FfiConverterString.lower(dbPath),FfiConverterString.lower(keyHex),FfiConverterCallbackInterfaceSyncProgressListener.lower(progress)
+                    FfiConverterString.lower(dbPath),FfiConverterString.lower(keyHex),FfiConverterOptionBool.lower(spo2),FfiConverterCallbackInterfaceSyncProgressListener.lower(progress)
                 )
             },
             pollFunc: ffi_oura_core_rust_future_poll_rust_buffer,
@@ -954,14 +954,24 @@ public struct SyncReport {
     public var eventsSynced: UInt32
     public var inserted: UInt32
     public var nextCursor: UInt32
+    /**
+     * The blood-oxygen sensing mode this sync set on the ring (`Some(true)` = on),
+     * or `None` when it wasn't asked to change it or the ring refused.
+     */
+    public var spo2Set: Bool?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(serial: String, eventsSynced: UInt32, inserted: UInt32, nextCursor: UInt32) {
+    public init(serial: String, eventsSynced: UInt32, inserted: UInt32, nextCursor: UInt32, 
+        /**
+         * The blood-oxygen sensing mode this sync set on the ring (`Some(true)` = on),
+         * or `None` when it wasn't asked to change it or the ring refused.
+         */spo2Set: Bool?) {
         self.serial = serial
         self.eventsSynced = eventsSynced
         self.inserted = inserted
         self.nextCursor = nextCursor
+        self.spo2Set = spo2Set
     }
 }
 
@@ -981,6 +991,9 @@ extension SyncReport: Equatable, Hashable {
         if lhs.nextCursor != rhs.nextCursor {
             return false
         }
+        if lhs.spo2Set != rhs.spo2Set {
+            return false
+        }
         return true
     }
 
@@ -989,6 +1002,7 @@ extension SyncReport: Equatable, Hashable {
         hasher.combine(eventsSynced)
         hasher.combine(inserted)
         hasher.combine(nextCursor)
+        hasher.combine(spo2Set)
     }
 }
 
@@ -1003,7 +1017,8 @@ public struct FfiConverterTypeSyncReport: FfiConverterRustBuffer {
                 serial: FfiConverterString.read(from: &buf), 
                 eventsSynced: FfiConverterUInt32.read(from: &buf), 
                 inserted: FfiConverterUInt32.read(from: &buf), 
-                nextCursor: FfiConverterUInt32.read(from: &buf)
+                nextCursor: FfiConverterUInt32.read(from: &buf), 
+                spo2Set: FfiConverterOptionBool.read(from: &buf)
         )
     }
 
@@ -1012,6 +1027,7 @@ public struct FfiConverterTypeSyncReport: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.eventsSynced, into: &buf)
         FfiConverterUInt32.write(value.inserted, into: &buf)
         FfiConverterUInt32.write(value.nextCursor, into: &buf)
+        FfiConverterOptionBool.write(value.spo2Set, into: &buf)
     }
 }
 
@@ -1330,6 +1346,30 @@ extension FfiConverterCallbackInterfaceSyncProgressListener : FfiConverter {
 #endif
     public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(v))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
+    typealias SwiftType = Bool?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterBool.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterBool.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
     }
 }
 
@@ -1748,7 +1788,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_oura_core_checksum_method_ringsession_push_frame() != 19557) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_oura_core_checksum_method_ringsession_sync() != 10321) {
+    if (uniffi_oura_core_checksum_method_ringsession_sync() != 49427) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_oura_core_checksum_constructor_ringsession_new() != 7650) {

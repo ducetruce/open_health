@@ -350,6 +350,9 @@ pub struct SyncReport {
     pub events_synced: u32,
     pub inserted: u32,
     pub next_cursor: u32,
+    /// The blood-oxygen sensing mode this sync set on the ring (`Some(true)` = on),
+    /// or `None` when it wasn't asked to change it or the ring refused.
+    pub spo2_set: Option<bool>,
 }
 
 /// What a successful [`RingSession::pair`] installed.
@@ -599,6 +602,7 @@ impl RingSession {
         &self,
         db_path: String,
         key_hex: String,
+        spo2: Option<bool>,
         progress: Box<dyn SyncProgressListener>,
     ) -> Result<SyncReport, SyncError> {
         let mut stop = self.stop.subscribe();
@@ -609,7 +613,7 @@ impl RingSession {
             biased;
             _ = stop.changed() => Err(SyncError::Interrupted {
                 reason: stop.borrow().clone().unwrap_or_else(|| "cancelled".into()) }),
-            result = self.sync_inner(db_path, key_hex, progress) => result,
+            result = self.sync_inner(db_path, key_hex, spo2, progress) => result,
         }
     }
 
@@ -760,6 +764,7 @@ impl RingSession {
         &self,
         db_path: String,
         key_hex: String,
+        spo2: Option<bool>,
         progress: Box<dyn SyncProgressListener>,
     ) -> Result<SyncReport, SyncError> {
         let fail = |e: String| SyncError::Failed(e);
@@ -781,6 +786,21 @@ impl RingSession {
             .setup_app_stream()
             .await
             .map_err(|e| fail(e.to_string()))?;
+        // Blood-oxygen sensing is a ring setting: off after a key-only pairing, and
+        // without it the ring records no SpO2 at all. Same command as the desktop
+        // `oura features --enable-spo2`. A refusal doesn't fail the sync.
+        let mut spo2_set = None;
+        if let Some(on) = spo2 {
+            use oura_protocol::protocol::{feature, feature_mode};
+            let mode = if on { feature_mode::AUTOMATIC } else { feature_mode::OFF };
+            match client.set_feature_mode(feature::SPO2, mode).await {
+                Ok(()) => {
+                    spo2_set = Some(on);
+                    progress.on_progress(format!("spo2 {}", if on { "on" } else { "off" }), 0, 0);
+                }
+                Err(error) => progress.on_progress(format!("spo2 setting failed: {error}"), 0, 0),
+            }
+        }
         // Push the phone's clock to the ring so this boot logs a `time_sync` anchor.
         // Without one, a rebooted ring's nights have no bridge to wall-clock time:
         // `time_sync` is the only wall-clock anchor in the event stream, and it is
@@ -895,6 +915,7 @@ impl RingSession {
             events_synced: outcome.events_synced,
             inserted: inserted.into_inner(),
             next_cursor: outcome.next_cursor,
+            spo2_set,
         })
     }
 }
@@ -985,6 +1006,7 @@ mod tests {
                 .sync(
                     "unused.db".into(),
                     "0123456789abcdef0123456789abcdef".into(),
+                    None,
                     Box::new(IgnoreProgress),
                 )
                 .await

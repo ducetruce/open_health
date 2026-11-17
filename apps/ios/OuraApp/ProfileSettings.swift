@@ -101,6 +101,7 @@ struct ProfileSettingsView: View {
     @ObservedObject private var health = HealthExport.shared
     @ObservedObject private var units = UnitSettings.shared
     @State private var ouraImport: OuraImportInfo?
+    @State private var measureBloodOxygen = BloodOxygen.wanted
     @State private var choosingExport = false
     @State private var importStatus: String?
     @State private var importingExport = false
@@ -210,6 +211,17 @@ struct ProfileSettingsView: View {
                     }
                     .disabled(importing)
                     if let message { Text(message).font(.footnote).foregroundStyle(Obs.ink2) }
+                }
+
+                Section {
+                    Toggle("Measure blood oxygen during sleep", isOn: $measureBloodOxygen)
+                        .onChange(of: measureBloodOxygen) { _, on in BloodOxygen.wanted = on }
+                } header: {
+                    Text("Ring")
+                } footer: {
+                    Text(BloodOxygen.pendingChange == nil
+                         ? "The ring measures blood oxygen overnight. It uses a little more ring battery."
+                         : "Applied to your ring at the next sync. The ring measures blood oxygen overnight, using a little more ring battery.")
                 }
 
                 Section {

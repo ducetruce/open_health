@@ -237,6 +237,31 @@ enum DB {
 }
 
 /// The ring auth key (exported from the desktop client) kept in the Keychain.
+/// The ring's blood-oxygen (SpO2) sensing, a setting stored on the ring itself. It is
+/// off after pairing a ring through this app, and without it the ring records no
+/// SpO2. The wanted state is sent on the next sync until the ring confirms it.
+enum BloodOxygen {
+    private static let wantedKey = "spo2.wanted"
+    private static let appliedKey = "spo2.applied"
+
+    /// On unless the user turned it off.
+    static var wanted: Bool {
+        get { UserDefaults.standard.object(forKey: wantedKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: wantedKey) }
+    }
+
+    /// What the ring last confirmed, if anything.
+    static var applied: Bool? { UserDefaults.standard.object(forKey: appliedKey) as? Bool }
+
+    /// The setting to send with the next sync, or nil when the ring already has it.
+    static var pendingChange: Bool? { applied == wanted ? nil : wanted }
+
+    static func recordApplied(_ value: Bool?) {
+        guard let value else { return }
+        UserDefaults.standard.set(value, forKey: appliedKey)
+    }
+}
+
 enum Keychain {
     private static let account = "ring-auth-key"
     static func saveKey(_ hex: String) {
@@ -799,7 +824,9 @@ final class RingSync: ObservableObject {
                     }
                     self?.showProgress(stage: stage, bytesLeft: bytesLeft, events: events)
                 }
-                let report = try await s.sync(dbPath: DB.url.path, keyHex: key, progress: progress)
+                let report = try await s.sync(dbPath: DB.url.path, keyHex: key,
+                                              spo2: BloodOxygen.pendingChange, progress: progress)
+                BloodOxygen.recordApplied(report.spo2Set)
                 Keychain.saveKey(key)
                 rememberSerial(report.serial)
                 rememberPeripheral(t.connectedPeripheralID)

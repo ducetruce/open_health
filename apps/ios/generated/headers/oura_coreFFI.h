@@ -318,7 +318,7 @@ void uniffi_oura_core_fn_method_ringsession_push_frame(void*_Nonnull ptr, RustBu
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_METHOD_RINGSESSION_SYNC
 #define UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_METHOD_RINGSESSION_SYNC
-uint64_t uniffi_oura_core_fn_method_ringsession_sync(void*_Nonnull ptr, RustBuffer db_path, RustBuffer key_hex, uint64_t progress
+uint64_t uniffi_oura_core_fn_method_ringsession_sync(void*_Nonnull ptr, RustBuffer db_path, RustBuffer key_hex, RustBuffer spo2, uint64_t progress
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OURA_CORE_FN_INIT_CALLBACK_VTABLE_BLEWRITER
