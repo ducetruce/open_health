@@ -57,6 +57,11 @@ struct NightRow: Codable, Identifiable {
     var stages: [Int]? = nil
     var stages_full: [Int]? = nil
     var staging_source: String? = nil
+    /// For estimated stages: whether asleep-vs-awake came from the ring ("ring") or
+    /// from the estimate too ("signals").
+    var sleep_wake_source: String? = nil
+    /// Stages estimated from heart rate, HRV and movement, not Oura's model or the ring.
+    var stagesEstimated: Bool { staging_source == "signals" }
     /// The official app's main chart: 30 s stages folded into 5-minute blocks.
     var stages_5min: [Int]? = nil
     /// Wall-clock start (unix s) of the first NSSA epoch.

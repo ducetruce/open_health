@@ -1285,6 +1285,57 @@ pub fn stage_night_from_signals(
     smooth_stages(&refined, 5)
 }
 
+/// Let the ring's own asleep/awake call (`sleep_period_information_2.sleep_state`,
+/// smoothed over [`SLEEP_STATE_SMOOTHING`] windows) decide sleep versus wake in a
+/// signal-estimated hypnogram: an epoch the ring scored awake becomes wake (4), and
+/// one it scored asleep that the estimate called wake becomes light sleep (2). Deep /
+/// light / REM stay the estimate's. Returns whether the ring reported states at all;
+/// rings that don't (a Ring 4 has been seen without them) keep the estimate as is.
+fn apply_ring_sleep_state(stages: &mut [i64], start_ds: i64, end_ds: i64, sleep_state: &[(i64, i64)]) -> bool {
+    let window: Vec<(i64, i64)> = sleep_state
+        .iter()
+        .copied()
+        .filter(|(ds, _)| (start_ds - 600..=end_ds + 600).contains(ds))
+        .collect();
+    if window.len() < SLEEP_STATE_SMOOTHING || stages.is_empty() {
+        return false;
+    }
+    let asleep: Vec<(i64, bool)> = (0..window.len())
+        .map(|i| {
+            let lo = i.saturating_sub(SLEEP_STATE_SMOOTHING / 2);
+            let hi = (i + SLEEP_STATE_SMOOTHING / 2 + 1).min(window.len());
+            let slice = &window[lo..hi];
+            (window[i].0, slice.iter().filter(|(_, s)| *s == 1).count() * 2 > slice.len())
+        })
+        .collect();
+    let epoch_ds = (end_ds - start_ds) as f64 / stages.len() as f64;
+    // A window's call covers the epochs up to half-way to its neighbours; beyond
+    // 15 minutes from any window the ring said nothing and the estimate stands.
+    const REACH_DS: i64 = 15 * 60 * 10;
+    for (i, stage) in stages.iter_mut().enumerate() {
+        let at = start_ds + ((i as f64 + 0.5) * epoch_ds) as i64;
+        let nearest = asleep.partition_point(|(ds, _)| *ds < at);
+        let candidates = [nearest.checked_sub(1), Some(nearest)];
+        let Some(&(ds, is_asleep)) = candidates
+            .iter()
+            .flatten()
+            .filter_map(|&j| asleep.get(j))
+            .min_by_key(|(ds, _)| (ds - at).abs())
+        else {
+            continue;
+        };
+        if (ds - at).abs() > REACH_DS {
+            continue;
+        }
+        if !is_asleep {
+            *stage = 4;
+        } else if *stage == 4 {
+            *stage = 2;
+        }
+    }
+    true
+}
+
 /// Fallback batch stager for desktop/CLI runs when the proprietary `.pt` model is
 /// unavailable on the machine. Reads nocturnal `hrv_event` (`0x5d`) and `motion_event`
 /// (`0x47`) streams from `db` and returns the same JSON batch shape as `run_sleep_model.py`.
@@ -1299,6 +1350,7 @@ pub fn stage_nights_from_signals(db: &Path, sleep_ranges: &[[i64; 3]]) -> Option
         let mut hr_t = Vec::new();
         let mut hrv_t = Vec::new();
         let mut motion_t = Vec::new();
+        let mut sleep_state: Vec<(i64, i64)> = Vec::new();
         for (ds, tag, jstr, _cu) in &events {
             if *ds < start_ds - 600 || *ds > end_ds + 600 {
                 continue;
@@ -1319,16 +1371,25 @@ pub fn stage_nights_from_signals(db: &Path, sleep_ranges: &[[i64; 3]]) -> Option
                         motion_t.push((*ds, s));
                     }
                 }
+            } else if *tag == 0x6a {
+                // sleep_period_information_2: the ring's own asleep/awake call per window.
+                if let Ok(v) = serde_json::from_str::<Value>(jstr) {
+                    if let Some(state) = v["sleep_state"].as_i64() {
+                        sleep_state.push((*ds, state));
+                    }
+                }
             }
         }
+        sleep_state.sort_by_key(|&(ds, _)| ds);
         hr_t.sort_by_key(|&(ds, _)| ds);
         hrv_t.sort_by_key(|&(ds, _)| ds);
         motion_t.sort_by_key(|&(ds, _)| ds);
-        let stages = stage_night_from_signals(start_ds, end_ds, &hr_t, &hrv_t, &motion_t);
+        let mut stages = stage_night_from_signals(start_ds, end_ds, &hr_t, &hrv_t, &motion_t);
         if stages.is_empty() {
             results.push(Value::Null);
             continue;
         }
+        let ring_sleep_wake = apply_ring_sleep_state(&mut stages, start_ds, end_ds, &sleep_state);
         let n = stages.len() as f64;
         let pct =
             |code: i64| (stages.iter().filter(|&&c| c == code).count() as f64 / n * 100.0).round();
@@ -1346,6 +1407,9 @@ pub fn stage_nights_from_signals(db: &Path, sleep_ranges: &[[i64; 3]]) -> Option
             "rem_pct": pct(3),
             "wake_pct": pct(4),
             "source": "signals",
+            // Where asleep-versus-awake came from: the ring's own per-window call when it
+            // reported one, otherwise the heart-rate / HRV / motion estimate.
+            "sleep_wake_source": if ring_sleep_wake { "ring" } else { "signals" },
             "stages": stages,
         }));
     }
@@ -2446,6 +2510,27 @@ pub fn build_summary(
     for (start_ds, hypnogram) in ring_hypnograms(&ring_sleeps, &nights, unix_s_at) {
         hyps.entry(start_ds).or_insert(hypnogram);
     }
+    // A night with neither model nor ring staging (a model-free build, on a ring that
+    // doesn't write sleep_phase_data) would otherwise have no time asleep at all: no
+    // sleep debt, sleep score or efficiency. Estimate its stages from the ring's
+    // heart-rate, HRV and motion streams instead, as the web dashboard does when no
+    // model is available. Marked `source: "signals"`.
+    let unstaged: Vec<[i64; 3]> = nights
+        .iter()
+        .filter(|nt| !hyps.contains_key(&(nt.start_ds, nt.captured_unix)))
+        .map(|nt| [nt.start_ds, nt.end_ds, nt.captured_unix])
+        .collect();
+    if !unstaged.is_empty() {
+        if let Some(Value::Array(estimates)) = stage_nights_from_signals(db, &unstaged) {
+            for estimate in estimates {
+                if let (Some(start), Some(captured)) =
+                    (estimate["start_ds"].as_i64(), estimate["captured_unix"].as_i64())
+                {
+                    hyps.entry((start, captured)).or_insert(estimate);
+                }
+            }
+        }
+    }
 
     nights.sort_by(|a, b| {
         unix_s_at(a.start_ds, a.captured_unix)
@@ -2656,6 +2741,7 @@ pub fn build_summary(
             "efficiency": hyp.map(|h| h["efficiency_pct"].clone()),
             "stages": stage_cells,
             "staging_source": staging_source,
+            "sleep_wake_source": hyp.and_then(|h| h["sleep_wake_source"].as_str()),
             "staging_coverage_pct": coverage_pct,
             "staging_complete": complete_staging,
             "captured_unix": nt.captured_unix,
@@ -3295,6 +3381,94 @@ pub fn build_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ring_sleep_state_decides_sleep_versus_wake() {
+        // 8 h night as 96 five-minute epochs, all estimated as light sleep.
+        let (start, end) = (0i64, 8 * 36_000);
+        let mut stages = vec![2i64; 96];
+        // The ring says awake for the first hour, asleep afterwards (a window every 5 min).
+        let states: Vec<(i64, i64)> = (0..96)
+            .map(|i| (i as i64 * 3000 + 1500, if i < 12 { 0 } else { 1 }))
+            .collect();
+        assert!(apply_ring_sleep_state(&mut stages, start, end, &states));
+        assert!(stages[..10].iter().all(|&c| c == 4), "{:?}", &stages[..14]);
+        assert!(stages[14..].iter().all(|&c| c == 2));
+
+        // An estimated wake epoch the ring calls asleep becomes light sleep.
+        let mut stages = vec![4i64; 96];
+        let asleep: Vec<(i64, i64)> = (0..96).map(|i| (i as i64 * 3000 + 1500, 1)).collect();
+        assert!(apply_ring_sleep_state(&mut stages, start, end, &asleep));
+        assert!(stages.iter().all(|&c| c == 2));
+
+        // A ring that reports no states leaves the estimate alone.
+        let mut stages = vec![2i64; 96];
+        assert!(!apply_ring_sleep_state(&mut stages, start, end, &[]));
+        assert!(stages.iter().all(|&c| c == 2));
+    }
+
+    #[test]
+    fn unstaged_nights_get_an_estimate_and_count_towards_sleep_debt() {
+        let dir = std::env::temp_dir().join(format!("oura-sum-estimate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("estimate.db");
+        let _ = std::fs::remove_file(&db);
+        let _ = Store::open(&db).unwrap();
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        let base_unix: i64 = 1_767_225_600; // 2026-01-01 00:00 UTC
+        conn.execute(
+            "INSERT INTO events (serial, tag, name, ring_timestamp, body, decoded_json, captured_unix)
+             VALUES ('S1', 66, 'time_sync', 1000, X'00000000', ?1, ?2)",
+            rusqlite::params![format!("{{\"unix_time\":{base_unix}}}"), base_unix],
+        )
+        .unwrap();
+        let day_ds = 864_000i64;
+        for night in 0..6i64 {
+            let start = 10_000 + night * day_ds + 23 * 36_000; // 23:00
+            let end = start + 8 * 36_000;
+            let cap = base_unix + (night + 2) * 86_400;
+            // 5-minute HR/HRV averages through the night, packed 6 to an event.
+            let mut ds = start + 18_000;
+            let mut k = 0;
+            while ds <= end {
+                let hr = 52 + (k % 7);
+                let hrv = 40 + (k % 11) * 3;
+                let hrs = vec![hr; 6];
+                let hrvs = vec![hrv; 6];
+                conn.execute(
+                    "INSERT INTO events (serial, tag, name, ring_timestamp, body, decoded_json, captured_unix)
+                     VALUES ('S1', 93, 'hrv_event', ?1, ?2, ?3, ?4)",
+                    rusqlite::params![ds, vec![0u8; 12],
+                        json!({"hr_bpm": hrs, "rmssd_ms": hrvs, "interval_min": 5}).to_string(), cap],
+                )
+                .unwrap();
+                ds += 18_000;
+                k += 1;
+            }
+            let mut bed_body = (start as u32).to_le_bytes().to_vec();
+            bed_body.extend_from_slice(&(end as u32).to_le_bytes());
+            conn.execute(
+                "INSERT INTO events (serial, tag, name, ring_timestamp, body, decoded_json, captured_unix)
+                 VALUES ('S1', 118, 'bedtime_period', ?1, ?2, ?3, ?4)",
+                rusqlite::params![end, bed_body,
+                    json!({"bedtime_start_ds": start, "bedtime_end_ds": end, "duration_hours": 8.0}).to_string(),
+                    cap],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        let summary = build_summary(&db, 0.0, &NoModelRunner).unwrap();
+        let nights = summary["nights"].as_array().unwrap();
+        assert_eq!(nights.len(), 6);
+        for n in nights {
+            assert_eq!(n["staging_source"], "signals", "{}", n["staging_source"]);
+        }
+        let debt = &summary["sleep_debt"];
+        assert!(debt["valid_days"].as_i64().unwrap() >= 5, "{debt}");
+        assert!(nights[0]["sleep_score"]["score"].as_f64().is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn battery_headline_prefers_the_newest_dated_reading() {
