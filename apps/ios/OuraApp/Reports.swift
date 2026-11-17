@@ -1091,6 +1091,8 @@ func scoreBasisLabel(_ score: SleepScore) -> String {
 struct SleepScoreCard: View {
     let score: SleepScore
     var breathRate: Double? = nil
+    /// False when the card is shown inside another card.
+    var framed: Bool = true
     @State private var expanded = false
 
     private var tint: Color {
@@ -1153,7 +1155,7 @@ struct SleepScoreCard: View {
                 .buttonStyle(.plain)
             }
         }
-        .obsCard()
+        .modifier(OptionalObsCard(on: framed))
     }
 }
 
@@ -1207,7 +1209,7 @@ struct IllnessCard: View {
             HStack(alignment: .firstTextBaseline) {
                 ObsTag("symptom radar", icon: "waveform.path.ecg")
                 Spacer(minLength: 12)
-                Text(illness.date).font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                Text(Fmt.day(illness.date)).font(Obs.mono(10)).foregroundStyle(Obs.ink2)
             }
             VStack(alignment: .leading, spacing: 8) {
                 Label(illness.available ? status : "Getting to know you",
@@ -1993,5 +1995,13 @@ private struct MetProfile: View {
                 }
             }.frame(height: 12)
         }
+    }
+}
+
+/// Applies `.obsCard()` only when `on` is true.
+struct OptionalObsCard: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on { content.obsCard() } else { content }
     }
 }

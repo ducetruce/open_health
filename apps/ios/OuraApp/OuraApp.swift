@@ -1232,7 +1232,7 @@ struct RootView: View {
                         }
                         .buttonStyle(.plain)
                         if readinessExpanded {
-                            SleepScoreCard(score: readiness)
+                            SleepScoreCard(score: readiness, framed: false)
                             if readiness.provisional == true {
                                 Text("Readiness compares each night with your own recent nights. It becomes settled after about two weeks of synced nights.")
                                     .font(.system(size: 13)).foregroundStyle(Obs.ink2)

@@ -156,12 +156,16 @@ struct ProfileSettingsView: View {
                         Text("Male").tag("M")
                         Text("Other").tag("O")
                     }
-                    TextField("Age", value: $profile.age, format: .number.precision(.fractionLength(0...1)))
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Age") {
+                        TextField("Age", value: $profile.age, format: .number.precision(.fractionLength(0...1)))
+                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                    }
                     HeightField(cm: $profile.heightCm, unit: units.height)
                     WeightField(kg: $profile.weightKg, unit: units.weight)
-                    TextField("Ring size", value: $profile.ringSize, format: .number.precision(.fractionLength(0...1)))
-                        .keyboardType(.decimalPad)
+                    LabeledContent("Ring size") {
+                        TextField("Ring size", value: $profile.ringSize, format: .number.precision(.fractionLength(0...1)))
+                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                    }
                 } header: {
                     Text("Your data")
                 } footer: {

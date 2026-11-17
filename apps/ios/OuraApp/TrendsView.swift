@@ -433,7 +433,7 @@ struct TrendChart: View {
             AxisMarks(values: .automatic(desiredCount: 4)) { _ in
                 AxisGridLine().foregroundStyle(Obs.rule)
                 AxisValueLabel(format: unit == .month ? .dateTime.month(.abbreviated).year(.twoDigits)
-                                                      : .dateTime.month(.abbreviated).day())
+                                                      : .dateTime.month(.defaultDigits).day())
                     .foregroundStyle(Obs.muted)
             }
         }
