@@ -1,4 +1,8 @@
-//! Import of an Oura account "trends" export (CSV), done entirely on the device.
+//! Import of an Oura account export, done entirely on the device. Two layouts are
+//! read: the older single "trends" CSV (one row per day, comma-separated), and the
+//! newer per-type export (dailysleep.csv, dailyreadiness.csv, sleepmodel.csv,
+//! dailyactivity.csv, dailyspo2.csv …; semicolon-separated, contributor scores as
+//! JSON). The newer files are merged into the same one-row-per-day table first.
 //!
 //! The export does two jobs:
 //!
@@ -51,11 +55,13 @@ const WEIGHTS: &[(&str, &[(&str, f64)])] = &[
             ("Previous Day Activity Score", 10.0),
             ("Recovery Index Score", 10.0),
             ("Activity Balance Score", 8.0),
+            ("Sleep Regularity Score", 0.0),
         ],
     ),
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // `Mean` is written by `fit_contributor` directly
 enum Kind {
     Mono,
     Emp,
@@ -82,7 +88,10 @@ const DRIVERS: &[(&str, &[&str], Kind)] = &[
     ("Deep Sleep Score", &["Deep Sleep Duration"], Kind::Mono),
     ("Sleep Latency Score", &["Sleep Latency"], Kind::Emp),
     ("Restfulness Score", &["awake_frac", "Sleep Efficiency"], Kind::Lin),
-    ("Sleep Timin Score", &["mid_opt", "mid_reg", "mid_hour"], Kind::Lin),
+    // Distance of the sleep midpoint from the wearer's own usual midpoint (circular
+    // mean of the previous 28 nights). Fitted on recent days only (see RECENT_ONLY):
+    // Oura re-tuned timing once already, and old days then mislead the curve.
+    ("Sleep Timin Score", &["dist_usual"], Kind::Mono),
     ("Previous Night Score", &["Sleep Score"], Kind::Mono),
     (
         "Resting Heart Rate Score",
@@ -93,7 +102,8 @@ const DRIVERS: &[(&str, &[&str], Kind)] = &[
         ],
         Kind::Lin,
     ),
-    ("HRV Balance Score", &["Average HRV", "trail14_Average HRV"], Kind::Lin),
+    // Past week's HRV against the past two months' (`hrv_ratio`).
+    ("HRV Balance Score", &["hrv_ratio"], Kind::Mono),
     ("Temperature Score", &["Temperature Deviation (°C)"], Kind::Emp),
     (
         "Sleep Balance Score",
@@ -106,8 +116,16 @@ const DRIVERS: &[(&str, &[&str], Kind)] = &[
         &["prev_Average MET", "trail14_Average MET"],
         Kind::Lin,
     ),
-    ("Recovery Index Score", &[], Kind::Mean),
+    // Hours from the night's lowest heart rate to waking, and where in the night
+    // that low came. The older trends export lacks heart-rate curves: then the
+    // contributor falls back to its average (see `fit_contributor`).
+    ("Recovery Index Score", &["rec_h", "low_frac"], Kind::Lin),
+    // Spread of the sleep midpoint over the past week, and tonight's distance from it.
+    ("Sleep Regularity Score", &["mid_sd7", "mid_reg"], Kind::Lin),
 ];
+
+/// Contributors fitted on only the most recent N usable days.
+const RECENT_ONLY: &[(&str, usize)] = &[("Sleep Timin Score", 250)];
 
 /// Daily values kept as history: export column → key in the summary JSON.
 const HISTORY_COLUMNS: &[(&str, &str)] = &[
@@ -120,6 +138,7 @@ const HISTORY_COLUMNS: &[(&str, &str)] = &[
     ("Temperature Deviation (°C)", "temp_deviation"),
     ("Respiratory Rate", "breath_rate"),
     ("Average Breath", "breath_rate"),
+    ("SpO2 Average", "spo2"),
     ("Steps", "steps"),
     ("Activity Burn", "active_kcal"),
     ("Active Calories", "active_kcal"),
@@ -145,8 +164,11 @@ pub fn clear(db: &Path) -> Result<()> {
 
 // ── CSV ──────────────────────────────────────────────────────────────────────
 
-/// Minimal RFC 4180 reader: quoted fields, doubled quotes, CRLF or LF.
+/// Minimal RFC 4180 reader: quoted fields, doubled quotes, CRLF or LF. The
+/// delimiter is a comma, or a semicolon when the header line has more of those.
 fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let header = text.lines().next().unwrap_or("");
+    let delimiter = if header.matches(';').count() > header.matches(',').count() { ';' } else { ',' };
     let mut rows = Vec::new();
     let mut row = Vec::new();
     let mut field = String::new();
@@ -166,7 +188,7 @@ fn parse_csv(text: &str) -> Vec<Vec<String>> {
         }
         match c {
             '"' => quoted = true,
-            ',' => row.push(std::mem::take(&mut field)),
+            c if c == delimiter => row.push(std::mem::take(&mut field)),
             '\r' => {}
             '\n' => {
                 row.push(std::mem::take(&mut field));
@@ -300,6 +322,40 @@ fn engineer(rows: &mut [Row]) {
             }
         }
     }
+    // Timing and regularity: distance from the usual (28-night circular mean)
+    // midpoint, and the spread of the past week's midpoints.
+    let mut mids: Vec<Option<f64>> = Vec::new();
+    for r in rows.iter_mut() {
+        let h = get(r, "mid_hour");
+        if let Some(h) = h {
+            let usual: Vec<f64> = mids.iter().rev().take(28).flatten().map(|m| m.rem_euclid(24.0)).collect();
+            if usual.len() >= 5 {
+                if let Some(u) = clock_mean(&usual) {
+                    r.insert("dist_usual".into(), json!(clock_distance(h.rem_euclid(24.0), u)));
+                }
+            }
+            let week: Vec<f64> = mids.iter().rev().take(7).flatten().copied().collect();
+            if week.len() >= 3 {
+                r.insert("mid_sd7".into(), json!(std_dev(&[week, vec![h]].concat())));
+            }
+        }
+        mids.push(h);
+    }
+    // HRV balance: mean of the past week (tonight included) over the past 60 days.
+    let mut hrv_hist: Vec<f64> = Vec::new();
+    for r in rows.iter_mut() {
+        if let Some(x) = get(r, "Average HRV") {
+            if hrv_hist.len() >= 20 {
+                let week: Vec<f64> = hrv_hist[hrv_hist.len().saturating_sub(6)..].iter().copied().chain([x]).collect();
+                let base = &hrv_hist[hrv_hist.len().saturating_sub(60)..];
+                let b = base.iter().sum::<f64>() / base.len() as f64;
+                if b > 0.0 {
+                    r.insert("hrv_ratio".into(), json!(week.iter().sum::<f64>() / week.len() as f64 / b));
+                }
+            }
+            hrv_hist.push(x);
+        }
+    }
     // lag-1 and causal trailing means
     let mut prev: Option<f64> = None;
     for r in rows.iter_mut() {
@@ -341,6 +397,15 @@ fn pav(y: &[f64]) -> Vec<f64> {
         blocks.push((value, weight, count));
     }
     blocks.into_iter().flat_map(|(v, _, c)| std::iter::repeat_n(v, c)).collect()
+}
+
+/// Population standard deviation (numpy's default).
+pub fn std_dev(v: &[f64]) -> f64 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    let m = v.iter().sum::<f64>() / v.len() as f64;
+    (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
 }
 
 fn mean(v: &[f64]) -> f64 {
@@ -511,6 +576,7 @@ fn component_key(contributor: &str) -> &'static str {
         "Previous Day Activity Score" => "previous_day_activity",
         "Recovery Index Score" => "recovery_index",
         "Activity Balance Score" => "activity_balance",
+        "Sleep Regularity Score" => "sleep_regularity",
         _ => "other",
     }
 }
@@ -550,26 +616,184 @@ fn ymd_of(raw: &str) -> Option<String> {
     (d.as_bytes()[4] == b'-' && d.as_bytes()[7] == b'-').then(|| d.to_string())
 }
 
-/// Parse, calibrate and store an export. Returns what was imported, for display.
+/// Parse, calibrate and store a single-file export (the older trends CSV, or any one
+/// file of the newer layout). Returns what was imported, for display.
 pub fn import(db: &Path, csv_text: &str) -> Result<Value> {
-    let table = parse_csv(csv_text);
-    let header = table.first().ok_or_else(|| anyhow!("the file is empty"))?;
-    let header: Vec<String> = header.iter().map(|h| h.to_string()).collect();
-    if !header.iter().any(|h| h == "date") {
-        return Err(anyhow!(
-            "this doesn't look like an Oura trends export (no \"date\" column). Columns found: {}",
-            header.iter().take(12).cloned().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    let known: Vec<&str> = HISTORY_COLUMNS.iter().map(|(c, _)| *c).collect();
-    if !header.iter().any(|h| known.contains(&h.as_str())) {
-        return Err(anyhow!(
-            "no score or sleep columns were recognised. Columns found: {}",
-            header.iter().take(12).cloned().collect::<Vec<_>>().join(", ")
-        ));
-    }
+    import_files(db, &[("export.csv".to_string(), csv_text.to_string())])
+}
 
-    let mut rows: Vec<Row> = table[1..]
+/// One file of the newer per-type export, recognised by its columns.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum V2Kind {
+    DailySleep,
+    DailyReadiness,
+    SleepPeriods,
+    DailyActivity,
+    DailySpo2,
+}
+
+fn v2_kind(header: &[String]) -> Option<V2Kind> {
+    let has = |c: &str| header.iter().any(|h| h == c);
+    if !has("day") {
+        return None;
+    }
+    if has("total_sleep_duration") && has("bedtime_start") {
+        Some(V2Kind::SleepPeriods)
+    } else if has("contributors") && has("temperature_deviation") {
+        Some(V2Kind::DailyReadiness)
+    } else if has("contributors") && has("active_calories") {
+        Some(V2Kind::DailyActivity)
+    } else if has("spo2_percentage") {
+        Some(V2Kind::DailySpo2)
+    } else if has("contributors") && has("score") && header.len() <= 6 {
+        Some(V2Kind::DailySleep)
+    } else {
+        None
+    }
+}
+
+const V2_SLEEP_CONTRIBUTORS: &[(&str, &str)] = &[
+    ("total_sleep", "Total Sleep Score"),
+    ("restfulness", "Restfulness Score"),
+    ("efficiency", "Sleep Efficiency Score"),
+    ("rem_sleep", "REM Sleep Score"),
+    ("deep_sleep", "Deep Sleep Score"),
+    ("latency", "Sleep Latency Score"),
+    ("timing", "Sleep Timin Score"),
+];
+const V2_READINESS_CONTRIBUTORS: &[(&str, &str)] = &[
+    ("resting_heart_rate", "Resting Heart Rate Score"),
+    ("previous_night", "Previous Night Score"),
+    ("hrv_balance", "HRV Balance Score"),
+    ("body_temperature", "Temperature Score"),
+    ("sleep_balance", "Sleep Balance Score"),
+    ("previous_day_activity", "Previous Day Activity Score"),
+    ("recovery_index", "Recovery Index Score"),
+    ("activity_balance", "Activity Balance Score"),
+    ("sleep_regularity", "Sleep Regularity Score"),
+];
+
+/// Hours from a night's lowest heart rate (median of 5 consecutive 5-minute samples,
+/// as `readiness::recovery_index_h` does on ring data) to the end of the night, and
+/// where in the night that low fell (0 = start, 1 = end).
+fn recovery_from_curve(curve: &Value) -> Option<(f64, f64)> {
+    let step = curve["interval"].as_f64().unwrap_or(300.0);
+    let items = curve["items"].as_array()?;
+    let present: Vec<(usize, f64)> =
+        items.iter().enumerate().filter_map(|(i, v)| v.as_f64().map(|x| (i, x))).collect();
+    if present.len() < 12 {
+        return None;
+    }
+    let lowest = present
+        .windows(5)
+        .map(|w| {
+            let mut v: Vec<f64> = w.iter().map(|p| p.1).collect();
+            v.sort_by(|a, b| a.total_cmp(b));
+            (w[2].0, v[2])
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))?;
+    let hours = (items.len() - lowest.0) as f64 * step / 3600.0;
+    let night_hours = items.len() as f64 * step / 3600.0;
+    Some((hours, 1.0 - hours / night_hours))
+}
+
+/// Merge the newer export's files into one row per day, using the trends export's
+/// column names so the rest of the pipeline is shared.
+fn merge_v2(tables: &[(V2Kind, Vec<Row>)]) -> Vec<Row> {
+    let mut days: BTreeMap<String, Row> = BTreeMap::new();
+    let s = |r: &Row, k: &str| r.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    for (kind, rows) in tables {
+        for r in rows {
+            let Some(day) = ymd_of(&s(r, "day")) else { continue };
+            let entry = days.entry(day.clone()).or_insert_with(|| Row::from([("date".to_string(), json!(day))]));
+            let mut put = |key: &str, v: Option<f64>| {
+                if let Some(v) = v {
+                    entry.insert(key.to_string(), json!(v));
+                }
+            };
+            let contributors = |r: &Row| -> Value {
+                serde_json::from_str(&s(r, "contributors")).unwrap_or(Value::Null)
+            };
+            match kind {
+                V2Kind::DailySleep => {
+                    put("Sleep Score", get(r, "score"));
+                    let c = contributors(r);
+                    for (k, col) in V2_SLEEP_CONTRIBUTORS {
+                        put(col, c[*k].as_f64());
+                    }
+                }
+                V2Kind::DailyReadiness => {
+                    put("Readiness Score", get(r, "score"));
+                    put("Temperature Deviation (°C)", get(r, "temperature_deviation"));
+                    let c = contributors(r);
+                    for (k, col) in V2_READINESS_CONTRIBUTORS {
+                        put(col, c[*k].as_f64());
+                    }
+                }
+                V2Kind::DailyActivity => {
+                    put("Activity Score", get(r, "score"));
+                    put("Average MET", get(r, "average_met_minutes"));
+                    put("Steps", get(r, "steps"));
+                    put("Active Calories", get(r, "active_calories"));
+                }
+                V2Kind::DailySpo2 => {
+                    let v: Value = serde_json::from_str(&s(r, "spo2_percentage")).unwrap_or(Value::Null);
+                    put("SpO2 Average", v["average"].as_f64());
+                }
+                V2Kind::SleepPeriods => {}
+            }
+        }
+    }
+    // Sleep periods: the day's main sleep is its longest "long_sleep" in bed.
+    let mut main: BTreeMap<String, &Row> = BTreeMap::new();
+    for (kind, rows) in tables {
+        if *kind != V2Kind::SleepPeriods {
+            continue;
+        }
+        for r in rows {
+            if s(r, "type") != "long_sleep" {
+                continue;
+            }
+            let Some(day) = ymd_of(&s(r, "day")) else { continue };
+            let longer = main.get(&day).map_or(true, |m| get(r, "time_in_bed") > get(m, "time_in_bed"));
+            if longer {
+                main.insert(day, r);
+            }
+        }
+    }
+    for (day, r) in main {
+        let entry = days.entry(day.clone()).or_insert_with(|| Row::from([("date".to_string(), json!(day))]));
+        for (from, to) in [
+            ("total_sleep_duration", "Total Sleep Duration"),
+            ("efficiency", "Sleep Efficiency"),
+            ("rem_sleep_duration", "REM Sleep Duration"),
+            ("deep_sleep_duration", "Deep Sleep Duration"),
+            ("latency", "Sleep Latency"),
+            ("awake_time", "Awake Time"),
+            ("time_in_bed", "Total Bedtime"),
+            ("lowest_heart_rate", "Lowest Resting Heart Rate"),
+            ("average_heart_rate", "Average Resting Heart Rate"),
+            ("average_hrv", "Average HRV"),
+            ("average_breath", "Average Breath"),
+        ] {
+            if let Some(v) = get(r, from) {
+                entry.insert(to.to_string(), json!(v));
+            }
+        }
+        entry.insert("Bedtime Start".into(), json!(s(r, "bedtime_start")));
+        entry.insert("Bedtime End".into(), json!(s(r, "bedtime_end")));
+        let curve: Value = serde_json::from_str(&s(r, "heart_rate")).unwrap_or(Value::Null);
+        if let Some((hours, frac)) = recovery_from_curve(&curve) {
+            entry.insert("rec_h".into(), json!(hours));
+            entry.insert("low_frac".into(), json!(frac));
+        }
+    }
+    days.into_values().collect()
+}
+
+fn table_rows(table: &[Vec<String>]) -> Vec<Row> {
+    let header = &table[0];
+    table[1..]
         .iter()
         .map(|cells| {
             header
@@ -578,51 +802,174 @@ pub fn import(db: &Path, csv_text: &str) -> Result<Value> {
                 .map(|(h, v)| (h.clone(), Value::String(v.clone())))
                 .collect()
         })
-        .collect();
+        .collect()
+}
+
+/// Parse, calibrate and store an export given as one or more files
+/// (`(file name, contents)`). Files that aren't part of a recognised export are
+/// skipped; it is an error only when nothing usable is found.
+pub fn import_files(db: &Path, files: &[(String, String)]) -> Result<Value> {
+    let known: Vec<&str> = HISTORY_COLUMNS.iter().map(|(c, _)| *c).collect();
+    let mut trends: Vec<Row> = Vec::new();
+    let mut v2: Vec<(V2Kind, Vec<Row>)> = Vec::new();
+    let mut unrecognised: Vec<String> = Vec::new();
+    for (name, text) in files {
+        let table = parse_csv(text);
+        let Some(header) = table.first() else {
+            unrecognised.push(format!("{name} (empty)"));
+            continue;
+        };
+        if let Some(kind) = v2_kind(header) {
+            v2.push((kind, table_rows(&table)));
+        } else if header.iter().any(|h| h == "date") && header.iter().any(|h| known.contains(&h.as_str())) {
+            trends.extend(table_rows(&table));
+        } else {
+            unrecognised.push(format!(
+                "{name} (columns: {})",
+                header.iter().take(12).cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
+    let (mut rows, source) = if !v2.is_empty() {
+        (merge_v2(&v2), "Oura data export")
+    } else {
+        (trends, "Oura trends export")
+    };
     rows.retain(|r| r.get("date").and_then(Value::as_str).and_then(ymd_of).is_some());
     if rows.is_empty() {
-        return Err(anyhow!("the export has no dated rows"));
+        if files.len() == 1 && files[0].1.trim().is_empty() {
+            return Err(anyhow!("the file is empty"));
+        }
+        return Err(anyhow!(
+            "no Oura export data was recognised. Pick dailysleep.csv, dailyreadiness.csv, \
+sleepmodel.csv and dailyactivity.csv from the export (or its trends CSV). Not used: {}",
+            unrecognised.join("; ")
+        ));
     }
+    calibrate_and_store(db, rows, source)
+}
+
+/// Least-squares weights of a score over its contributor sub-scores, in percent,
+/// used only when they reproduce the score closely and none is negative.
+fn fitted_weights(rows: &[Row], score_name: &str, defaults: &[(&str, f64)]) -> Option<Map<String, Value>> {
+    let present: Vec<&str> = defaults
+        .iter()
+        .map(|(c, _)| *c)
+        .filter(|c| rows.iter().filter(|r| get(r, c).is_some()).count() >= 30)
+        .collect();
+    let usable: Vec<&Row> = rows
+        .iter()
+        .filter(|r| get(r, score_name).is_some() && present.iter().all(|c| get(r, c).is_some()))
+        .collect();
+    if present.len() < 3 || usable.len() < 30 {
+        return None;
+    }
+    let x: Vec<Vec<f64>> = usable.iter().map(|r| present.iter().map(|c| get(r, c).unwrap()).collect()).collect();
+    let y: Vec<f64> = usable.iter().map(|r| get(r, score_name).unwrap()).collect();
+    // No intercept: append a zero column, then drop its coefficient.
+    let with_zero: Vec<Vec<f64>> = x.iter().map(|row| row.clone()).collect();
+    let b = least_squares_no_intercept(&with_zero, &y)?;
+    if b.iter().any(|w| *w < -0.005) {
+        return None;
+    }
+    let mae = x.iter().zip(&y).map(|(row, t)| (row.iter().zip(&b).map(|(v, w)| v * w).sum::<f64>() - t).abs()).sum::<f64>()
+        / y.len() as f64;
+    if mae > 2.5 {
+        return None;
+    }
+    Some(present.iter().zip(&b).map(|(c, w)| ((*c).to_string(), json!((w.max(0.0) * 1000.0).round() / 10.0))).collect())
+}
+
+/// Ordinary least squares through the origin, via the normal equations.
+fn least_squares_no_intercept(x: &[Vec<f64>], y: &[f64]) -> Option<Vec<f64>> {
+    let k = x.first()?.len();
+    let mut a = vec![vec![0.0; k]; k];
+    let mut v = vec![0.0; k];
+    for (row, t) in x.iter().zip(y) {
+        for i in 0..k {
+            v[i] += row[i] * t;
+            for j in 0..k {
+                a[i][j] += row[i] * row[j];
+            }
+        }
+    }
+    for (i, r) in a.iter_mut().enumerate() {
+        r[i] += 1e-6;
+    }
+    // Gaussian elimination with partial pivoting.
+    for col in 0..k {
+        let pivot = (col..k).max_by(|&p, &q| a[p][col].abs().total_cmp(&a[q][col].abs()))?;
+        a.swap(col, pivot);
+        v.swap(col, pivot);
+        if a[col][col].abs() < 1e-12 {
+            return None;
+        }
+        for row in col + 1..k {
+            let f = a[row][col] / a[col][col];
+            for c in col..k {
+                a[row][c] -= f * a[col][c];
+            }
+            v[row] -= f * v[col];
+        }
+    }
+    let mut b = vec![0.0; k];
+    for i in (0..k).rev() {
+        b[i] = (v[i] - (i + 1..k).map(|j| a[i][j] * b[j]).sum::<f64>()) / a[i][i];
+    }
+    Some(b)
+}
+
+/// Fit one contributor from `rows`; when its drivers aren't in the export, fall
+/// back to the contributor's average so it still counts at its usual level.
+fn fit_contributor(rows: &[Row], contributor: &str, drivers: &[&str], kind: Kind) -> Option<(Value, usize)> {
+    let recent = RECENT_ONLY.iter().find(|(c, _)| *c == contributor).map(|(_, n)| *n);
+    let mut x: Vec<Vec<f64>> = Vec::new();
+    let mut y: Vec<f64> = Vec::new();
+    for r in rows {
+        let Some(target) = get(r, contributor) else { continue };
+        let Some(values) = drivers.iter().map(|d| get(r, d)).collect::<Option<Vec<f64>>>() else {
+            continue;
+        };
+        x.push(values);
+        y.push(target);
+    }
+    if let Some(n) = recent {
+        let skip = y.len().saturating_sub(n);
+        x.drain(..skip);
+        y.drain(..skip);
+    }
+    if y.len() >= 20 && !drivers.is_empty() {
+        let curve = fit(kind, &x, &y)?;
+        return Some((json!({ "drivers": drivers, "kind": kind.name(), "curve": curve }), y.len()));
+    }
+    let targets: Vec<f64> = rows.iter().filter_map(|r| get(r, contributor)).collect();
+    (targets.len() >= 20).then(|| {
+        (json!({ "drivers": [], "kind": "mean", "curve": { "kind": "mean", "v": mean(&targets) } }), targets.len())
+    })
+}
+
+fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Value> {
     engineer(&mut rows);
 
     // calibration
     let mut weights = Map::new();
     for (score_name, list) in WEIGHTS {
-        let mut m = Map::new();
-        for (c, w) in *list {
-            m.insert((*c).to_string(), json!(w));
-        }
+        let fitted = fitted_weights(&rows, score_name, list);
+        let m: Map<String, Value> = fitted.unwrap_or_else(|| {
+            list.iter().filter(|(_, w)| *w > 0.0).map(|(c, w)| ((*c).to_string(), json!(w))).collect()
+        });
         weights.insert((*score_name).to_string(), Value::Object(m));
     }
     let mut contributors = Map::new();
     let mut days_used = 0;
     for (contributor, drivers, kind) in DRIVERS {
-        let mut x: Vec<Vec<f64>> = Vec::new();
-        let mut y: Vec<f64> = Vec::new();
-        for r in &rows {
-            let Some(target) = get(r, contributor) else { continue };
-            let Some(values) = drivers.iter().map(|d| get(r, d)).collect::<Option<Vec<f64>>>() else {
-                continue;
-            };
-            x.push(values);
-            y.push(target);
-        }
-        if y.len() < 20 {
-            continue;
-        }
-        if let Some(curve) = fit(*kind, &x, &y) {
-            contributors.insert(
-                (*contributor).to_string(),
-                json!({ "drivers": drivers, "kind": kind.name(), "curve": curve }),
-            );
-            days_used = days_used.max(y.len());
+        if let Some((spec, n)) = fit_contributor(&rows, contributor, drivers, *kind) {
+            contributors.insert((*contributor).to_string(), spec);
+            days_used = days_used.max(n);
         }
     }
     let covers = |score_name: &str| {
-        WEIGHTS
-            .iter()
-            .find(|(n, _)| *n == score_name)
-            .is_some_and(|(_, list)| list.iter().any(|(c, _)| contributors.contains_key(*c)))
+        weights[score_name].as_object().is_some_and(|w| w.keys().any(|c| contributors.contains_key(c)))
     };
     let calibrated = json!({ "sleep": covers(SLEEP), "readiness": covers(READINESS) });
 
@@ -647,7 +994,7 @@ pub fn import(db: &Path, csv_text: &str) -> Result<Value> {
     let last = history.keys().next_back().cloned();
 
     let stored = json!({
-        "source": "Oura trends export",
+        "source": source,
         "imported_rows": rows.len(),
         "first": first,
         "last": last,
@@ -655,7 +1002,7 @@ pub fn import(db: &Path, csv_text: &str) -> Result<Value> {
         "calibrated": calibrated,
         "history": history,
         "params": {
-            "source": "Oura trends export",
+            "source": source,
             "n_days": days_used,
             "weights": weights,
             "contributors": contributors,
@@ -671,6 +1018,7 @@ pub fn import(db: &Path, csv_text: &str) -> Result<Value> {
         "last": stored["last"],
         "calibrated": calibrated,
         "calibration_days": days_used,
+        "source": source,
     }))
 }
 
@@ -777,11 +1125,81 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
         assert!(load(&db).is_none());
     }
 
+    /// A small export in the newer per-type layout: semicolons, JSON contributors,
+    /// a nap alongside each main sleep, and an unrelated file that must be skipped.
+    fn synthetic_v2(days: usize) -> Vec<(String, String)> {
+        let mut sleep = String::from("id;contributors;day;score;timestamp\n");
+        let mut ready = String::from("id;contributors;day;score;temperature_deviation;temperature_trend_deviation;timestamp\n");
+        let mut periods = String::from("id;average_breath;average_heart_rate;average_hrv;awake_time;bedtime_end;bedtime_start;day;deep_sleep_duration;efficiency;heart_rate;latency;lowest_heart_rate;rem_sleep_duration;time_in_bed;total_sleep_duration;type\n");
+        let mut activity = String::from("id;active_calories;average_met_minutes;contributors;day;score;steps\n");
+        for i in 0..days {
+            let day = format!("2025-{:02}-{:02}", 1 + (i / 28) % 12, 1 + i % 28);
+            let f = i as f64;
+            let total = 21_600.0 + (f * 37.0) % 7_200.0;
+            let ts = (total / 28_800.0 * 100.0).min(100.0).round();
+            let eff = 80.0 + (f * 3.0) % 15.0;
+            let (rest, rem, deep, lat, tim) = (
+                60.0 + (f * 11.0) % 40.0,
+                50.0 + (f * 17.0) % 50.0,
+                55.0 + (f * 23.0) % 45.0,
+                40.0 + (f * 29.0) % 60.0,
+                20.0 + (f * 31.0) % 80.0,
+            );
+            let score = (0.35 * ts + 0.15 * rest + 0.10 * (eff + rem + deep + lat + tim)).round();
+            sleep.push_str(&format!(
+                "s{i};\"{{\"\"total_sleep\"\": {ts}, \"\"restfulness\"\": {rest}, \"\"efficiency\"\": {eff}, \"\"rem_sleep\"\": {rem}, \"\"deep_sleep\"\": {deep}, \"\"latency\"\": {lat}, \"\"timing\"\": {tim}}}\";{day};{score};{day}T00:00:00.000+00:00\n"
+            ));
+            let hrv = 40.0 + (f * 7.0) % 30.0;
+            let rem_s = total * 0.2;
+            ready.push_str(&format!(
+                "r{i};\"{{\"\"resting_heart_rate\"\": 85, \"\"previous_night\"\": {score}, \"\"hrv_balance\"\": {hb}, \"\"body_temperature\"\": 95, \"\"sleep_balance\"\": 80, \"\"previous_day_activity\"\": 75, \"\"recovery_index\"\": 90, \"\"activity_balance\"\": 80, \"\"sleep_regularity\"\": 70}}\";{day};80;0.1;0.0;{day}T00:00:00.000+00:00\n",
+                hb = (hrv + 30.0).min(100.0)
+            ));
+            let hr: Vec<String> = (0..96).map(|k| format!("{}", 60.0 - (k as f64 - 40.0).abs() * 0.1)).collect();
+            for (kind, start, end, bed) in [("long_sleep", "00:10", "08:10", 28_800.0), ("sleep", "14:00", "14:30", 1_800.0)] {
+                periods.push_str(&format!(
+                    "p{i}{kind};14.5;55;{hrv};1800;{day}T{end}:00.000-08:00;{day}T{start}:00.000-08:00;{day};{deep};{eff};\"{{\"\"interval\"\": 300.0, \"\"items\"\": [{hr}]}}\";600;50;{rem};{bed};{total};{kind}\n",
+                    deep = total * 0.15, rem = rem_s, hr = hr.join(", ")
+                ));
+            }
+            activity.push_str(&format!("a{i};300;1.5;\"{{}}\";{day};80;{}\n", 6000 + i * 13));
+        }
+        vec![
+            ("dailysleep.csv".into(), sleep),
+            ("dailyreadiness.csv".into(), ready),
+            ("sleepmodel.csv".into(), periods),
+            ("dailyactivity.csv".into(), activity),
+            ("ringbatterylevel.csv".into(), "id;level;timestamp\nx;90;2025-01-01\n".into()),
+        ]
+    }
+
+    #[test]
+    fn imports_the_per_type_export() {
+        let db = temp_db("v2");
+        let result = import_files(&db, &synthetic_v2(90)).unwrap();
+        assert_eq!(result["days"], 90, "{result}");
+        assert_eq!(result["source"], "Oura data export");
+        assert_eq!(result["calibrated"]["sleep"], true);
+        assert_eq!(result["calibrated"]["readiness"], true);
+        let stored = load(&db).unwrap();
+        // The main sleep wins over the afternoon nap.
+        assert_eq!(stored["history"]["2025-01-01"]["asleep_s"], 21_600.0);
+        assert_eq!(stored["history"]["2025-01-01"]["steps"], 6000.0);
+        let params = &stored["params"];
+        // Sleep weights are learned from the contributors: the generator used 35/15/10…
+        let w = &params["weights"][SLEEP];
+        assert!((w["Total Sleep Score"].as_f64().unwrap() - 35.0).abs() < 1.0, "{w}");
+        // Recovery index is fitted from the heart-rate curves, not held at its average.
+        assert_eq!(params["contributors"]["Recovery Index Score"]["kind"], "lin");
+        assert_eq!(params["contributors"]["Sleep Timin Score"]["drivers"][0], "dist_usual");
+        clear(&db).unwrap();
+    }
+
     #[test]
     fn rejects_other_files_with_a_useful_message() {
         let db = temp_db("reject");
         let err = import(&db, "name,value\nx,1\n").unwrap_err().to_string();
-        assert!(err.contains("Columns found: name, value"), "{err}");
+        assert!(err.contains("columns: name, value"), "{err}");
         assert!(import(&db, "").is_err());
     }
 }

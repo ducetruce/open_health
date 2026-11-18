@@ -2885,6 +2885,15 @@ pub fn build_summary(
                 m.insert("mid_hour", wrapped);
                 m.insert("mid_opt", -((wrapped - 27.0).powi(2)));
                 m.insert("mid_reg", regularity);
+                // Distance from the usual midpoint: the previous 28 main sleeps' circular
+                // mean, or the past week's while fewer than 5 nights are known.
+                let usual: Vec<f64> = prior_main_mid_hours.iter().rev().take(28).copied().collect();
+                let dist_usual = if usual.len() >= 5 {
+                    oura_export::clock_mean(&usual).map(|u| oura_export::clock_distance(mid_hour, u)).unwrap_or(regularity)
+                } else {
+                    regularity
+                };
+                m.insert("dist_usual", dist_usual);
                 let scored = oura_export::score(params, oura_export::SLEEP, &m, false);
                 oura_sleep = scored["score"].as_f64();
                 night_json["oura_sleep_score"] = scored;
@@ -2907,6 +2916,34 @@ pub fn build_summary(
             m.insert("Temperature Deviation (°C)", temp_deviation);
             m.insert("Total Sleep Duration", total_sleep);
             m.insert("trail14_Total Sleep Duration", trailing(&prior_main_asleep).unwrap_or(total_sleep));
+            // HRV balance: the past week (tonight included) over the past 60 nights.
+            let earlier_hrv: Vec<f64> =
+                prior_main_hrv.iter().filter(|&&(end, _)| end <= start_unix).map(|&(_, v)| v).collect();
+            let hrv_ratio = if earlier_hrv.len() >= 20 {
+                let week: Vec<f64> = earlier_hrv[earlier_hrv.len().saturating_sub(6)..].iter().copied().chain([hrv]).collect();
+                let base = &earlier_hrv[earlier_hrv.len().saturating_sub(60)..];
+                mean(&week).zip(mean(base)).filter(|(_, b)| *b > 0.0).map(|(w, b)| w / b)
+            } else {
+                trailing(&prior_main_hrv).filter(|b| *b > 0.0).map(|b| hrv / b)
+            };
+            m.insert("hrv_ratio", hrv_ratio.unwrap_or(1.0));
+            // Sleep regularity: spread of the past week's midpoints and tonight's distance.
+            let wrapped = oura_export::wrapped_hour(mid_hour);
+            let week_mids: Vec<f64> =
+                prior_main_mid_hours.iter().rev().take(7).map(|h| oura_export::wrapped_hour(*h)).collect();
+            let week_clock: Vec<f64> = prior_main_mid_hours.iter().rev().take(7).copied().collect();
+            if week_mids.len() >= 3 {
+                m.insert("mid_sd7", oura_export::std_dev(&[week_mids, vec![wrapped]].concat()));
+            } else {
+                m.insert("mid_sd7", 0.5);
+            }
+            m.insert("mid_reg", oura_export::clock_mean(&week_clock)
+                .map(|u| oura_export::clock_distance(mid_hour, u)).unwrap_or(0.0));
+            // Recovery index: hours from the night's low to waking, and where it fell.
+            let night_h = ((end_unix - start_unix) / 3600.0).max(0.5);
+            let rec_h = readiness::recovery_index_h(&nt.hr_t, nt.end_ds).unwrap_or(night_h * 0.5);
+            m.insert("rec_h", rec_h);
+            m.insert("low_frac", (1.0 - rec_h / night_h).clamp(0.0, 1.0));
             let wake_day = (end_unix as i64 + offset_seconds(tz)).div_euclid(86_400);
             let history = prior_main_ends.iter().filter(|&&end| end <= start_unix).count();
             pending_readiness.push((nights_json.len(), wake_day, m, history < readiness::MATURE_NIGHTS));

@@ -183,6 +183,12 @@ client re-derives packet timing at all — tracked as a follow-up.
 
 ## Known gaps (iOS-only, not yet on the web)
 
+- **Oura per-type export import** (`oura_export::import_files`, FFI `import_oura_export_files`):
+  reads Oura's newer export (dailysleep / dailyreadiness / sleepmodel / dailyactivity /
+  dailyspo2 CSVs, semicolon-separated with JSON contributors) as well as the older trends
+  CSV; learns the score weights from the export, and fits timing (distance from the usual
+  midpoint), HRV balance (week vs 60-night ratio), recovery index (from the heart-rate
+  curve) and the new sleep-regularity contributor. iOS only (Profile → Oura history).
 - **Signal (terminal) visual design**: iOS only. Near-black canvas, one mint-green accent,
   VT323 pixel font for numbers and titles, Share Tech Mono labels, digital-rain hero card,
   pixel-block bar charts, custom tab bar with a + log sheet (`SignalUI.swift`, `Theme.swift`).

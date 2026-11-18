@@ -113,21 +113,52 @@ struct ProfileSettingsView: View {
         self.onSaved = onSaved
     }
 
-    private func importExport(_ url: URL) {
+    /// Export files the importer uses; everything else in Oura's export (raw
+    /// location, motion, heart rate…) is left unread, some of it is hundreds of MB.
+    private static let wantedExportFiles = ["dailysleep", "dailyreadiness", "sleepmodel",
+                                            "dailyactivity", "dailyspo2", "trends"]
+
+    /// The CSVs to read from what was picked: files directly, or the wanted ones
+    /// inside a picked folder (the unzipped export).
+    private static func exportFiles(in urls: [URL]) -> [URL] {
+        var out: [URL] = []
+        for url in urls {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                let items = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil)
+                while let item = items?.nextObject() as? URL {
+                    if item.pathExtension.lowercased() == "csv" { out.append(item) }
+                }
+            } else {
+                out.append(url)
+            }
+        }
+        if out.count == 1 { return out }
+        return out.filter { url in
+            let name = url.deletingPathExtension().lastPathComponent.lowercased()
+            return wantedExportFiles.contains { name.contains($0) }
+        }
+    }
+
+    private func importExport(_ urls: [URL]) {
         importingExport = true
         importStatus = nil
         Task.detached(priority: .userInitiated) {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let text = (try? String(contentsOf: url, encoding: .utf8))
-                ?? (try? String(contentsOf: url, encoding: .isoLatin1))
-            let json = text.map { importOuraExport(dbPath: DB.url.path, csvText: $0) }
+            let scoped = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
+            defer { for (url, ok) in scoped where ok { url.stopAccessingSecurityScopedResource() } }
+            let files: [[String: String]] = Self.exportFiles(in: urls).compactMap { url in
+                guard let text = (try? String(contentsOf: url, encoding: .utf8))
+                        ?? (try? String(contentsOf: url, encoding: .isoLatin1)) else { return nil }
+                return ["name": url.lastPathComponent, "text": text]
+            }
+            let list = (try? JSONSerialization.data(withJSONObject: files)).flatMap { String(data: $0, encoding: .utf8) }
+            let json = files.isEmpty ? nil : list.map { importOuraExportFiles(dbPath: DB.url.path, filesJson: $0) }
             let object = json.flatMap { $0.data(using: .utf8) }
                 .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
             await MainActor.run {
                 importingExport = false
                 guard let object else {
-                    importStatus = "Couldn't read that file."
+                    importStatus = files.isEmpty ? "No Oura export files found in what you picked." : "Couldn't read those files."
                     return
                 }
                 if let error = object["error"] as? String {
@@ -141,7 +172,8 @@ struct ProfileSettingsView: View {
                     calibrated: .init(sleep: calibrated?["sleep"] as? Bool,
                                       readiness: calibrated?["readiness"] as? Bool))
                 ouraImport = info
-                importStatus = "Imported \(info.days ?? 0) days."
+                let both = (calibrated?["sleep"] as? Bool ?? false) && (calibrated?["readiness"] as? Bool ?? false)
+                importStatus = "Imported \(info.days ?? 0) days" + (both ? ". Sleep and Readiness are now on Oura's scale." : ".")
                 onSaved()
             }
         }
@@ -259,11 +291,12 @@ struct ProfileSettingsView: View {
                 } header: {
                     Text("Oura history")
                 } footer: {
-                    Text("Import the trends CSV from your Oura account to fit Readiness and Sleep to Oura's own scale and to see your history from before this app. It stays on this iPhone.")
+                    Text("Pick the unzipped Oura export folder, or its dailysleep, dailyreadiness, sleepmodel and dailyactivity CSVs (an older trends CSV works too). This fits Readiness and Sleep to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
                 }
                 .fileImporter(isPresented: $choosingExport,
-                              allowedContentTypes: [.commaSeparatedText, .plainText, .text, .data]) { result in
-                    if case .success(let url) = result { importExport(url) }
+                              allowedContentTypes: [.folder, .commaSeparatedText, .plainText, .text, .data],
+                              allowsMultipleSelection: true) { result in
+                    if case .success(let urls) = result, !urls.isEmpty { importExport(urls) }
                 }
 
                 Section {

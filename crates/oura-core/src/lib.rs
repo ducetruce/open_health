@@ -57,6 +57,25 @@ pub fn import_oura_export(db_path: String, csv_text: String) -> String {
     }
 }
 
+/// Import an Oura export given as several files, as the newer export ships them
+/// (dailysleep.csv, dailyreadiness.csv, sleepmodel.csv, dailyactivity.csv, …).
+/// `files_json` is `[{"name": "…", "text": "…"}, …]`; unrelated files are skipped.
+/// Returns the same summary as [`import_oura_export`], or `{ "error": "…" }`.
+#[uniffi::export]
+pub fn import_oura_export_files(db_path: String, files_json: String) -> String {
+    let files: Vec<(String, String)> = match serde_json::from_str::<Vec<serde_json::Value>>(&files_json) {
+        Ok(list) => list
+            .into_iter()
+            .filter_map(|f| Some((f["name"].as_str()?.to_string(), f["text"].as_str()?.to_string())))
+            .collect(),
+        Err(e) => return json!({ "error": format!("bad file list: {e}") }).to_string(),
+    };
+    match oura_summary::oura_export::import_files(std::path::Path::new(&db_path), &files) {
+        Ok(v) => v.to_string(),
+        Err(e) => json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
 /// Remove an imported Oura export (history and calibration). Returns `{}` or
 /// `{ "error": "…" }`.
 #[uniffi::export]

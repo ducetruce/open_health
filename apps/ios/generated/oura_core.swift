@@ -1640,6 +1640,20 @@ public func importOuraExport(dbPath: String, csvText: String) -> String {
 })
 }
 /**
+ * Import an Oura export given as several files, as the newer export ships them
+ * (dailysleep.csv, dailyreadiness.csv, sleepmodel.csv, dailyactivity.csv, …).
+ * `files_json` is `[{"name": "…", "text": "…"}, …]`; unrelated files are skipped.
+ * Returns the same summary as [`import_oura_export`], or `{ "error": "…" }`.
+ */
+public func importOuraExportFiles(dbPath: String, filesJson: String) -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_oura_core_fn_func_import_oura_export_files(
+        FfiConverterString.lower(dbPath),
+        FfiConverterString.lower(filesJson),$0
+    )
+})
+}
+/**
  * A lightweight, model-free summary (device + data-health only) — kept as a fast
  * path / fallback. Returns `{ serials, device, event_counts, total_events, raw_events, decoded_events }`.
  */
@@ -1759,6 +1773,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_oura_core_checksum_func_import_oura_export() != 36274) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_oura_core_checksum_func_import_oura_export_files() != 7574) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_oura_core_checksum_func_quick_summary_json() != 3685) {
