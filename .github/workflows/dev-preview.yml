@@ -5,13 +5,19 @@ name: Dev preview (tests + simulator screenshots)
 # `preview` branch, together with the regenerated UniFFI bindings.
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: GitHub macOS image (switch when one queue is backlogged)
+        type: choice
+        default: macos-15
+        options: [macos-15, macos-14, macos-26, macos-latest]
 
 permissions:
   contents: write
 
 jobs:
   preview:
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +58,7 @@ jobs:
         working-directory: apps/ios/OuraApp
         run: |
           set -x
-          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if "iPhone 16 Pro" == v["name"] or "iPhone 16" in v["name"]))')
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); devs=[v for k,vs in d["devices"].items() if "iOS" in k for v in vs if v["name"].startswith("iPhone")]; pick=[v for v in devs if v["name"]=="iPhone 16 Pro"] or [v for v in devs if "Pro" in v["name"] and "Max" not in v["name"]] or devs; print(pick[-1]["udid"])')
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryLevel 100 --cellularBars 4 || true
