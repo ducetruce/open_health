@@ -25,6 +25,7 @@ struct ScoreRing: View {
                     Circle()
                         .trim(from: 0, to: max(0.001, min(1, p)))
                         .stroke(accent, style: StrokeStyle(lineWidth: lineWidth * 0.7, lineCap: .round))
+                        .padding(lineWidth * 0.35)
                         .rotationEffect(.degrees(-90))
                         .shadow(color: accent.opacity(0.55), radius: 6)
                         .animation(.easeOut(duration: 0.6), value: p)
@@ -40,8 +41,11 @@ struct ScoreRing: View {
             }
             .frame(width: size, height: size)
             // Rasterise the ring, its glow and the number as one layer, so the
-            // blurred shadows aren't recomputed every time the screen scrolls.
+            // blurred shadows aren't recomputed every time the screen scrolls. The
+            // margin keeps the glow and the arc's outer edge inside the image.
+            .padding(12)
             .drawingGroup()
+            .padding(-12)
             if showCaption {
                 Text(caption.uppercased())
                     .font(Obs.label(10)).tracking(1.4)
