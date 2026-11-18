@@ -253,14 +253,15 @@ struct WorkoutActions: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Obs.paper)
                     .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    .background(Obs.activityAccent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Obs.activityAccent, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
             Button(action: onLog) {
                 Label("Log past", systemImage: "plus")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Obs.ink)
+                    .foregroundStyle(Obs.signal)
                     .frame(maxWidth: .infinity).padding(.vertical, 14)
-                    .background(Obs.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(Obs.card, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Obs.signalDim, lineWidth: 1))
             }
         }
         .buttonStyle(.plain)

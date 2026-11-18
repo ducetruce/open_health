@@ -1720,6 +1720,14 @@ struct OuraApp: App {
     init() {
         DiagStore.shared.bootstrap()
         BackgroundSync.register()
+        // Segmented pickers (Trends periods, chart windows): selected segment in the
+        // signal green, labels in the terminal monospace.
+        let seg = UISegmentedControl.appearance()
+        let segFont = UIFont(name: "ShareTechMono-Regular", size: 14) ?? .monospacedSystemFont(ofSize: 14, weight: .regular)
+        seg.selectedSegmentTintColor = UIColor(Obs.signal)
+        seg.backgroundColor = UIColor(Obs.card)
+        seg.setTitleTextAttributes([.foregroundColor: UIColor(Obs.ink2), .font: segFont], for: .normal)
+        seg.setTitleTextAttributes([.foregroundColor: UIColor(Obs.onSignal), .font: segFont], for: .selected)
         // Dark, slightly translucent bars to sit on the night-sky canvas.
         let tabs = UITabBarAppearance()
         tabs.configureWithDefaultBackground()
