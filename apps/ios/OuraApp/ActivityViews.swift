@@ -39,6 +39,9 @@ struct ScoreRing: View {
                     .offset(y: -size * 0.012)
             }
             .frame(width: size, height: size)
+            // Rasterise the ring, its glow and the number as one layer, so the
+            // blurred shadows aren't recomputed every time the screen scrolls.
+            .drawingGroup()
             if showCaption {
                 Text(caption.uppercased())
                     .font(Obs.label(10)).tracking(1.4)
@@ -631,7 +634,20 @@ struct StatTile: View {
 /// Heart rate over a workout: `[[unix, bpm]]` points.
 struct WorkoutHRChart: View {
     let series: [[Double]]
+
+    private var scrubPoints: [ScrubPoint] {
+        let pts = series.compactMap { $0.count >= 2 ? ($0[0], $0[1]) : nil }
+        guard pts.count > 1, let t0 = pts.first?.0, let t1 = pts.last?.0, t1 > t0 else { return [] }
+        return pts.map { t, v in
+            ScrubPoint(x: (t - t0) / (t1 - t0), label: "+\(Fmt.duration(seconds: t - t0)) · \(Int(v.rounded())) bpm")
+        }
+    }
+
     var body: some View {
+        canvas.scrubbable(scrubPoints)
+    }
+
+    private var canvas: some View {
         Canvas { ctx, size in
             let pts = series.compactMap { $0.count >= 2 ? ($0[0], $0[1]) : nil }
             guard pts.count > 1, let t0 = pts.first?.0, let t1 = pts.last?.0, t1 > t0 else { return }

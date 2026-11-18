@@ -285,10 +285,12 @@ struct TrendsTab<Header: View>: View {
                     } else {
                         TrendHighlights(summaries: shown, period: period)
                         ForEach(shown, id: \.metric) { summary in
-                            Button { detail = summary.metric } label: {
-                                TrendCard(summary: summary, period: period, compact: true)
-                            }
-                            .buttonStyle(.plain)
+                            // A tap opens the detail view; touching the chart and
+                            // sliding scrubs it instead.
+                            TrendCard(summary: summary, period: period, compact: true)
+                                .contentShape(Rectangle())
+                                .onTapGesture { detail = summary.metric }
+                                .accessibilityAddTraits(.isButton)
                         }
                     }
                 }
@@ -403,6 +405,24 @@ struct TrendCard: View {
 struct TrendChart: View {
     let summary: TrendSummary
     var height: CGFloat
+    /// The date under the finger while scrubbing.
+    @State private var scrubDate: Date?
+    @State private var lastTicked: Date?
+    private static let ticker = UISelectionFeedbackGenerator()
+
+    private var selectedBucket: TrendSummary.Bucket? {
+        guard let scrubDate else { return nil }
+        return summary.buckets.min { abs($0.start.timeIntervalSince(scrubDate)) < abs($1.start.timeIntervalSince(scrubDate)) }
+    }
+
+    private func readout(_ b: TrendSummary.Bucket) -> String {
+        let metric = summary.metric
+        let when = summary.bucketLabel == "Daily" ? b.start.formatted(.dateTime.month(.abbreviated).day())
+            : summary.bucketLabel == "Weekly averages" ? "Week of " + b.start.formatted(.dateTime.month(.abbreviated).day())
+            : b.start.formatted(.dateTime.month(.abbreviated).year())
+        let value = metric == .asleep ? Fmt.duration(seconds: b.value) : metric.format(b.value)
+        return "\(when) · \(value)\(metric.unit.isEmpty ? "" : " " + metric.unit)"
+    }
 
     var body: some View {
         let metric = summary.metric
@@ -427,6 +447,22 @@ struct TrendChart: View {
                     .foregroundStyle(Obs.ink.opacity(0.35))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
+            if let b = selectedBucket {
+                RuleMark(x: .value("Date", b.start, unit: unit))
+                    .foregroundStyle(Obs.signal)
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                    .annotation(position: .top, spacing: 2,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        Text(readout(b))
+                            .font(Obs.mono(11)).foregroundStyle(Obs.onSignal)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(Obs.signal, in: RoundedRectangle(cornerRadius: 3))
+                    }
+            }
+        }
+        .chartXSelection(value: $scrubDate)
+        .onChange(of: selectedBucket?.start) { _, new in
+            if let new, new != lastTicked { lastTicked = new; Self.ticker.selectionChanged() }
         }
         .chartYScale(domain: .automatic(includesZero: metric == .steps || metric == .activeKcal))
         .chartXAxis {

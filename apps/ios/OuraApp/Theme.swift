@@ -157,17 +157,21 @@ struct ObsCard: ViewModifier {
 
 /// Faint horizontal scanlines, like an old green-screen monitor.
 struct Scanlines: View {
-    var body: some View {
-        Canvas { ctx, size in
-            var y: CGFloat = 0
-            while y < size.height {
-                ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
-                         with: .color(Obs.signal.opacity(0.03)))
-                y += 3
-            }
+    /// A 1 × 3 point tile: one faint green line, two clear rows. Made once.
+    private static let tile: UIImage = {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: CGSize(width: 1, height: 3), format: format).image { ctx in
+            UIColor(Obs.signal).withAlphaComponent(0.03).setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+    }()
+
+    var body: some View {
+        Image(uiImage: Self.tile)
+            .resizable(resizingMode: .tile)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

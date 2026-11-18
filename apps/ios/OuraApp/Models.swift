@@ -339,12 +339,22 @@ struct UndatedNight: Codable {
     var captured_unix: Int64?; var source: String?
     var reason: String?; var recoverable: Bool?
 }
+/// Cached lookups for a `Summary` (see `Summary.index`).
+final class SummaryIndex {
+    var days: [String]?
+    var profileCount = -1
+    var nightByDay: [String: NightRow]?
+}
+
 struct Summary: Codable {
     var analysis_digest: String? = nil
     var analysis_version: Int? = nil
     var digest: String?
     var device: Device?
-    var nights: [NightRow] = []
+    var nights: [NightRow] = [] { didSet { index = SummaryIndex() } }
+    /// Day lookups computed once per summary (rebuilt whenever `nights` changes).
+    /// A reference type, so copies of an unchanged summary share the work.
+    private var index = SummaryIndex()
     var clock: ClockDiag?
     var vitals = Vitals()
     var activity_profile: [String: [Double]] = [:]   // date → 96 × 15-min mean MET-above-rest
@@ -442,16 +452,28 @@ extension Summary {
     // every date with a night (by wake date) or activity — newest first; the unit both
     // the home hero and AllDaysView iterate.
     var days: [String] {
+        if let cached = index.days, index.profileCount == activity_profile.count { return cached }
         var set = Set(activity_profile.keys)
         for n in nights { if let w = wakeYmd(n) { set.insert(w) } }
-        return set.sorted(by: >)
+        let sorted = set.sorted(by: >)
+        index.days = sorted
+        index.profileCount = activity_profile.count
+        return sorted
     }
 
     // the primary sleep you woke from on the morning of `day` — the longest in-bed night
     // wins over same-morning naps. Falls back to a MM-DD match for older data lacking ymd.
     func night(forDay day: String) -> NightRow? {
-        let cands = nights.filter { wakeYmd($0) == day }
-        if let best = cands.max(by: { ($0.in_bed_h ?? 0) < ($1.in_bed_h ?? 0) }) { return best }
+        if index.nightByDay == nil {
+            var byDay: [String: NightRow] = [:]
+            for n in nights {
+                guard let w = wakeYmd(n) else { continue }
+                if let have = byDay[w], (have.in_bed_h ?? 0) > (n.in_bed_h ?? 0) { continue }  // ties: the later night wins, as before
+                byDay[w] = n
+            }
+            index.nightByDay = byDay
+        }
+        if let best = index.nightByDay?[day] { return best }
         return nights.first { $0.ymd == nil && ($0.date ?? "").hasSuffix(String(day.suffix(5))) }
     }
     /// Model, user and rule workouts together, newest first.

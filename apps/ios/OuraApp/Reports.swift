@@ -1343,6 +1343,16 @@ private enum DebtGraph: String, CaseIterable { case debt = "Cumulative debt", sl
 private struct SleepDebtChart: View {
     let debt: SleepDebtSummary
     let mode: DebtGraph
+
+    private var scrubPoints: [ScrubPoint] {
+        let n = debt.days.count
+        return debt.days.enumerated().compactMap { i, day in
+            guard let v = mode == .debt ? day.cumulative_debt_min : day.total_sleep_min else { return nil }
+            let what = mode == .debt ? "debt" : "asleep"
+            return ScrubPoint(x: Double(i) / Double(max(1, n - 1)),
+                              label: "\(Fmt.day(day.date)) · \(Fmt.duration(minutes: v)) \(what)")
+        }
+    }
     var body: some View {
         VStack(spacing: 8) {
             Canvas { context, size in
@@ -1371,6 +1381,7 @@ private struct SleepDebtChart: View {
                 context.stroke(line, with: .color(Obs.chart), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             }
             .frame(height: 180)
+            .scrubbable(scrubPoints)
             HStack {
                 Text(debt.days.first.map { String($0.date.suffix(5)) } ?? "").font(Obs.mono(10)).foregroundStyle(Obs.ink2)
                 Spacer()
@@ -1986,6 +1997,13 @@ private struct MetProfile: View {
                 ctx.stroke(line, with: .color(Obs.chart), lineWidth: 1.3)
             }
             .frame(height: 120)
+            .scrubbable(timeline.points.map { p in
+                let span = max(1, timeline.endHour - timeline.startHour)
+                let h = p.hour.truncatingRemainder(dividingBy: 24)
+                let clock = String(format: "%02d:%02d", Int(h), Int((h - floor(h)) * 60))
+                return ScrubPoint(x: (p.hour - timeline.startHour) / span,
+                                  label: "\(clock) · \(String(format: "%.1f", p.met)) MET")
+            })
             GeometryReader { g in
                 let span = max(1, timeline.endHour - timeline.startHour)
                 ForEach(ticks, id: \.self) { hour in

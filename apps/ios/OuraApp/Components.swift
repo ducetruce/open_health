@@ -432,6 +432,9 @@ private struct VitalTrendChart: View {
                     }
                 }
                 .frame(height: 200)
+                .scrubbable(points.map { p in
+                    ScrubPoint(x: Double(x(p.date, 1)), label: "\(YMD.short(p.date)) · \(tick(p.value))")
+                })
                 .accessibilityLabel("Trend from \(YMD.short(start)) to \(YMD.short(end))")
             }
             HStack {

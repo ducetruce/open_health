@@ -5,33 +5,44 @@ import SwiftUI
 // log sheet the + opens, and the small metric tiles.
 
 /// Faint columns of falling characters, drawn behind a hero card's content.
-/// Holds still when the user has asked iOS to reduce motion.
+/// The glyphs are drawn once into a texture twice the card's height, and the whole
+/// texture slides down on a slow loop, so the animation costs the GPU a transform
+/// per frame instead of re-drawing hundreds of characters. Holds still when the
+/// user has asked iOS to reduce motion.
 struct DigitalRain: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var fall = false
     private static let glyphs = Array("ﾊ7ﾐ0ﾋｰ3ｳｼﾅ1ﾓﾆ9ｻﾜﾂ5ｵﾘ4ｱﾎﾃﾏｹﾒｴｶｷﾑﾕﾗｾﾈｽﾀﾇﾍ8ｦｲｸｺｿﾁﾄﾉﾌﾔﾖﾙﾚﾛﾝ2Z:")
-    private let column: CGFloat = 16
-    private let row: CGFloat = 16
+    private static let column: CGFloat = 16
+    private static let row: CGFloat = 16
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion)) { timeline in
+        GeometryReader { geo in
+            // One period is a whole number of rows, so the loop joins seamlessly.
+            let rows = max(1, Int(ceil(geo.size.height / Self.row)))
+            let period = CGFloat(rows) * Self.row
             Canvas { ctx, size in
-                let t = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
-                let cols = Int(size.width / column) + 1
-                let rows = Int(size.height / row) + 2
+                let cols = Int(size.width / Self.column) + 1
                 for c in 0..<cols {
-                    // Each column falls at its own speed, from its own offset.
-                    let speed = 10 + Double((c * 37) % 13)
-                    let shift = CGFloat((t * speed + Double(c * 53)).truncatingRemainder(dividingBy: Double(row) * Double(rows)))
-                    for r in 0..<rows {
-                        let y = (CGFloat(r) * row + shift).truncatingRemainder(dividingBy: CGFloat(rows) * row) - row
-                        let glyph = Self.glyphs[(c * 7 + r * 13) % Self.glyphs.count]
-                        let fade = 0.03 + 0.07 * Double(r % 5) / 4
+                    for r in 0..<(rows * 2) {
+                        let rr = r % rows
+                        let glyph = Self.glyphs[(c * 7 + rr * 13) % Self.glyphs.count]
+                        let fade = 0.03 + 0.07 * Double((rr + c * 3) % 5) / 4
                         ctx.draw(Text(String(glyph)).font(Obs.mono(12)).foregroundColor(Obs.signal.opacity(fade)),
-                                 at: CGPoint(x: CGFloat(c) * column + column / 2, y: y))
+                                 at: CGPoint(x: CGFloat(c) * Self.column + Self.column / 2,
+                                             y: CGFloat(r) * Self.row + Self.row / 2))
                     }
                 }
             }
+            .frame(width: geo.size.width, height: period * 2)
+            .drawingGroup()
+            .offset(y: fall ? 0 : -period)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.linear(duration: Double(period) / 9).repeatForever(autoreverses: false)) { fall = true }
+            }
         }
+        .clipped()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
@@ -215,5 +226,86 @@ struct SignalBadge: View {
             .foregroundStyle(Obs.signal)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .overlay(Rectangle().strokeBorder(Obs.signalDim, lineWidth: 1))
+    }
+}
+
+// MARK: - Scrubbing
+
+/// One position a chart can be scrubbed to: where it sits across the plot (0…1)
+/// and what the readout says there ("Nov 12 · 62 ms").
+struct ScrubPoint {
+    let x: Double
+    let label: String
+}
+
+/// Touch a chart and slide: a green line follows the finger, snapping to the
+/// nearest data point, with that point's readout above it and a light tick each
+/// time it moves to a new point. Lifting the finger clears it.
+struct Scrubbable: ViewModifier {
+    let points: [ScrubPoint]
+    /// Horizontal space the chart leaves empty on each side of its plot.
+    var leadingInset: CGFloat = 0
+    var trailingInset: CGFloat = 0
+    @State private var index: Int?
+    private static let ticker = UISelectionFeedbackGenerator()
+    private let labelWidth: CGFloat = 150
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            GeometryReader { geo in
+                let plotW = max(1, geo.size.width - leadingInset - trailingInset)
+                ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { g in
+                                    let f = Double((g.location.x - leadingInset) / plotW)
+                                    guard let i = nearest(to: f) else { return }
+                                    if i != index {
+                                        index = i
+                                        Self.ticker.selectionChanged()
+                                    }
+                                }
+                                .onEnded { _ in index = nil }
+                        )
+                    if let i = index, points.indices.contains(i) {
+                        let x = leadingInset + CGFloat(points[i].x) * plotW
+                        Rectangle().fill(Obs.signal)
+                            .frame(width: 1, height: geo.size.height)
+                            .shadow(color: Obs.signal.opacity(0.6), radius: 3)
+                            .offset(x: x - 0.5)
+                            .allowsHitTesting(false)
+                        Text(points[i].label)
+                            .font(Obs.mono(11)).foregroundStyle(Obs.onSignal)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(Obs.signal, in: RoundedRectangle(cornerRadius: 3))
+                            .frame(width: labelWidth)
+                            .offset(x: min(max(x - labelWidth / 2, 0), max(0, geo.size.width - labelWidth)), y: -24)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
+        }
+        .accessibilityHint("Touch and slide to read values")
+    }
+
+    private func nearest(to f: Double) -> Int? {
+        guard !points.isEmpty else { return nil }
+        var best = 0
+        var bestD = Double.infinity
+        for (i, p) in points.enumerated() {
+            let d = abs(p.x - f)
+            if d < bestD { bestD = d; best = i }
+        }
+        return best
+    }
+}
+
+extension View {
+    /// Lets the user touch and slide across the chart to read each value.
+    func scrubbable(_ points: [ScrubPoint], leadingInset: CGFloat = 0, trailingInset: CGFloat = 0) -> some View {
+        modifier(Scrubbable(points: points, leadingInset: leadingInset, trailingInset: trailingInset))
     }
 }

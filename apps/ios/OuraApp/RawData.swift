@@ -343,7 +343,26 @@ struct TimeSeriesChart: View {
     let points: [RawData.Point]
     var accent: Color = Obs.chart
 
+    private static let clock: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM d HH:mm:ss"; return f
+    }()
+
+    /// At most ~600 scrub stops, evenly spaced through the samples.
+    private var scrubPoints: [ScrubPoint] {
+        guard points.count > 1, let x0 = points.map(\.t).min(), let x1 = points.map(\.t).max(), x1 > x0 else { return [] }
+        let step = max(1, points.count / 600)
+        return stride(from: 0, to: points.count, by: step).map { i in
+            let p = points[i]
+            return ScrubPoint(x: (p.t - x0) / (x1 - x0),
+                              label: "\(Self.clock.string(from: Date(timeIntervalSince1970: p.t))) · \(fmt(p.v))")
+        }
+    }
+
     var body: some View {
+        canvas.scrubbable(scrubPoints, leadingInset: 6, trailingInset: 6)
+    }
+
+    private var canvas: some View {
         Canvas { ctx, size in
             guard points.count > 1 else { return }
             let xs = points.map(\.t), ys = points.map(\.v)

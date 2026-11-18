@@ -380,6 +380,8 @@ final class RingSync: ObservableObject {
     private var runID = ""
     private var attemptID = ""
     private var progressLogAt = 0.0
+    /// When the "Syncing… ~N left" line last changed; it repaints at most once a second.
+    private var progressShownAt = 0.0
     private var progressStage = ""
     private var lifecycleObservers: [NSObjectProtocol] = []
     /// True while a sync started by iOS in the background is running: it may keep
@@ -922,8 +924,12 @@ final class RingSync: ObservableObject {
                     guard rate > 0 else { return nil }
                     return Self.fmtDuration(Double(bytesLeft) / rate)
                 }
-                status = "Syncing… ~\(Self.fmtBytes(bytesLeft)) left · \(events) events"
-                    + (eta.map { " · about \($0)" } ?? "")
+                let uptime = ProcessInfo.processInfo.systemUptime
+                if uptime - progressShownAt >= 1 || !status.hasPrefix("Syncing… ~") {
+                    progressShownAt = uptime
+                    status = "Syncing… ~\(Self.fmtBytes(bytesLeft)) left · \(events) events"
+                        + (eta.map { " · about \($0)" } ?? "")
+                }
             } else if events > 0 {
                 status = "Syncing… \(events) events · finishing up"
             } else {
