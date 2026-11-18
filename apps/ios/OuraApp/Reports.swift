@@ -704,7 +704,9 @@ struct Readout: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(value).font(Obs.mono(20, .medium)).foregroundStyle(accent).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.6)
             Text(caption.uppercased()).font(Obs.mono(9)).tracking(1.2).foregroundStyle(Obs.ink2)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1628,7 +1630,7 @@ struct SleepReport: View {
                     editingBedtime.toggle()
                 } label: {
                     Readout(value: "\(n.start ?? "–")–\(n.end ?? "–")",
-                            caption: n.isBedtimeManual ? "bedtime · edited" : "bedtime · adjust",
+                            caption: n.isBedtimeManual ? "bedtime · edited" : "bedtime ›",
                             accent: editingBedtime ? Obs.chart : Obs.ink)
                 }
                 .buttonStyle(.plain)
