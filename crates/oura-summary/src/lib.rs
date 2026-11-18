@@ -3019,6 +3019,11 @@ pub fn build_summary(
     // Anthropometric VO2max (Jackson non-exercise estimate), ecore's own formula.
     let vo2max =
         oura_analysis::ported::metabolic::vo2max_jackson(demo.age, demo.sex == 'F', weight);
+    // Steps per minute by MET level: learned from an imported Oura export when there
+    // is one (oura_export::fit_steps), conservative defaults otherwise.
+    let step_params = oura_import.as_ref().map(|v| &v["params"]);
+    // Each minute counts once, even when the ring re-sends an overlapping record.
+    let mut seen_minutes: std::collections::HashSet<i64> = Default::default();
     for (ds, tag, jstr, cu) in &events {
         if name_of(*tag) != "activity_information" || !jstr.contains("\"met\"") {
             continue;
@@ -3031,6 +3036,9 @@ pub fn build_summary(
                 for (i, m) in met.iter().enumerate() {
                     let mv = m.as_f64().unwrap_or(1.0);
                     let unix = unix_s_at(*ds, *cu) + i as f64 * 60.0;
+                    if !seen_minutes.insert((unix / 60.0).floor() as i64) {
+                        continue;
+                    }
                     let local = unix + tz * 3600.0;
                     let day_idx = (local / 86400.0).floor() as i64;
                     let (y, mo, dd) = civil(day_idx);
@@ -3040,13 +3048,7 @@ pub fn build_summary(
                         .clamp(0.0, 95.0) as usize;
                     prof_sum.entry(key.clone()).or_insert([0.0; 96])[bucket] += (mv - 1.0).max(0.0);
                     prof_cnt.entry(key.clone()).or_insert([0; 96])[bucket] += 1;
-                    let step_rate = if mv >= 7.0 {
-                        150.0
-                    } else if mv >= 2.5 {
-                        105.0
-                    } else {
-                        0.0
-                    };
+                    let step_rate = oura_export::step_rate(step_params, mv);
                     let e = daily.entry(key).or_insert((0.0, 0.0));
                     e.0 += (mv - 1.0).max(0.0) * weight / 60.0;
                     e.1 += step_rate;

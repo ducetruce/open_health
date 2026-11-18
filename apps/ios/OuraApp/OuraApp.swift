@@ -1144,23 +1144,25 @@ struct RootView: View {
         let s = base.withUserWorkouts(workouts)
         TabView(selection: $tab) {
             tabPage { todayTab(s) }
-                .tabItem { Label("Today", systemImage: "house.fill") }.tag(AppTab.today).toolbar(.hidden, for: .tabBar)
+                .tabItem { Label("Today", systemImage: "house.fill") }.tag(AppTab.today).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
             tabPage { sleepTab(s) }
-                .tabItem { Label("Sleep", systemImage: "moon.fill") }.tag(AppTab.sleep).toolbar(.hidden, for: .tabBar)
+                .tabItem { Label("Sleep", systemImage: "moon.fill") }.tag(AppTab.sleep).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
             ActivityTab(s: s, onEndWorkout: finishWorkout) {
                 AppHeader(title: "Activity", subtitle: busyLabel) { headerButtons }
             }
             .background(Obs.canvas)
-            .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity).toolbar(.hidden, for: .tabBar)
+            .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
             TrendsTab(s: s) {
                 AppHeader(title: "Trends", subtitle: busyLabel) { headerButtons }
             }
-            .tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag(AppTab.trends).toolbar(.hidden, for: .tabBar)
+            .tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag(AppTab.trends).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
             tabPage { vitalsTab(s) }
-                .tabItem { Label("Vitals", systemImage: "heart.text.square.fill") }.tag(AppTab.vitals).toolbar(.hidden, for: .tabBar)
+                .tabItem { Label("Vitals", systemImage: "heart.text.square.fill") }.tag(AppTab.vitals).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
         }
         .tint(Obs.signal)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // The bar floats over the pages; each page reserves its height (below), so the
+        // end of every scrolling screen stops above it instead of underneath.
+        .overlay(alignment: .bottom) {
             SignalTabBar(tab: $tab) { showLogMenu = true }
         }
     }

@@ -124,6 +124,31 @@ const DRIVERS: &[(&str, &[&str], Kind)] = &[
     ("Sleep Regularity Score", &["mid_sd7", "mid_reg"], Kind::Lin),
 ];
 
+/// MET bin edges for step calibration: minutes are counted per bin
+/// [1.5, 2), [2, 2.5), … [8, ∞); below 1.5 MET counts as no steps.
+pub const STEP_EDGES: [f64; 7] = [1.5, 2.0, 2.5, 3.0, 4.0, 6.0, 8.0];
+/// Steps per minute in each MET bin when no export has been imported. Deliberately
+/// conservative: light activity (2-3 MET) is mostly not walking.
+pub const DEFAULT_STEP_RATES: [f64; 7] = [0.0, 0.0, 30.0, 90.0, 110.0, 140.0, 160.0];
+
+/// Which `STEP_EDGES` bin a minute's MET falls in, if any.
+pub fn step_bin(met: f64) -> Option<usize> {
+    STEP_EDGES.iter().rposition(|e| met >= *e)
+}
+
+/// Steps per minute at `met`, from an imported calibration's `steps` block or the
+/// defaults.
+pub fn step_rate(params: Option<&Value>, met: f64) -> f64 {
+    let Some(bin) = step_bin(met) else { return 0.0 };
+    let rates = params
+        .and_then(|p| p["steps"]["rates"].as_array())
+        .filter(|r| r.len() == STEP_EDGES.len());
+    match rates {
+        Some(r) => r[bin].as_f64().unwrap_or(DEFAULT_STEP_RATES[bin]),
+        None => DEFAULT_STEP_RATES[bin],
+    }
+}
+
 /// Contributors fitted on only the most recent N usable days.
 const RECENT_ONLY: &[(&str, usize)] = &[("Sleep Timin Score", 250)];
 
@@ -735,6 +760,23 @@ fn merge_v2(tables: &[(V2Kind, Vec<Row>)]) -> Vec<Row> {
                     put("Average MET", get(r, "average_met_minutes"));
                     put("Steps", get(r, "steps"));
                     put("Active Calories", get(r, "active_calories"));
+                    // Minutes per MET bin, to learn steps per minute (see `fit_steps`).
+                    let met: Value = serde_json::from_str(&s(r, "met")).unwrap_or(Value::Null);
+                    if let Some(items) = met["items"].as_array() {
+                        let step_min = met["interval"].as_f64().unwrap_or(60.0) / 60.0;
+                        let mut bins = [0.0; STEP_EDGES.len()];
+                        let mut measured = 0usize;
+                        for v in items.iter().filter_map(Value::as_f64) {
+                            measured += 1;
+                            if let Some(b) = step_bin(v) {
+                                bins[b] += step_min;
+                            }
+                        }
+                        // Only days worn for most of the day teach the step rates.
+                        if measured as f64 * step_min >= 16.0 * 60.0 {
+                            entry.insert("met_bins".into(), json!(bins));
+                        }
+                    }
                 }
                 V2Kind::DailySpo2 => {
                     let v: Value = serde_json::from_str(&s(r, "spo2_percentage")).unwrap_or(Value::Null);
@@ -948,8 +990,58 @@ fn fit_contributor(rows: &[Row], contributor: &str, drivers: &[&str], kind: Kind
     })
 }
 
+/// Steps per minute per MET bin, fitted so that minutes × rates reproduce the
+/// export's daily step counts (non-negative least squares by dropping negative
+/// bins and refitting). Returns `{edges, rates, days, mean_abs_error}`.
+fn fit_steps(rows: &[Row]) -> Option<Value> {
+    let data: Vec<(Vec<f64>, f64)> = rows
+        .iter()
+        .filter_map(|r| {
+            let bins: Vec<f64> = r.get("met_bins")?.as_array()?.iter().filter_map(Value::as_f64).collect();
+            let steps = get(r, "Steps")?;
+            (bins.len() == STEP_EDGES.len() && steps > 0.0).then_some((bins, steps))
+        })
+        .collect();
+    if data.len() < 30 {
+        return None;
+    }
+    let mut active: Vec<usize> = (0..STEP_EDGES.len()).collect();
+    let rates = loop {
+        let x: Vec<Vec<f64>> = data.iter().map(|(b, _)| active.iter().map(|&i| b[i]).collect()).collect();
+        let y: Vec<f64> = data.iter().map(|(_, s)| *s).collect();
+        let b = least_squares_no_intercept(&x, &y)?;
+        match b.iter().enumerate().filter(|(_, v)| **v < 0.0).min_by(|a, c| a.1.total_cmp(c.1)) {
+            Some((worst, _)) => {
+                active.remove(worst);
+                if active.is_empty() {
+                    return None;
+                }
+            }
+            None => {
+                let mut full = vec![0.0; STEP_EDGES.len()];
+                for (k, &i) in active.iter().enumerate() {
+                    full[i] = b[k];
+                }
+                break full;
+            }
+        }
+    };
+    let mae = data
+        .iter()
+        .map(|(b, s)| (b.iter().zip(&rates).map(|(m, r)| m * r).sum::<f64>() - s).abs())
+        .sum::<f64>()
+        / data.len() as f64;
+    Some(json!({
+        "edges": STEP_EDGES,
+        "rates": rates.iter().map(|r| (r * 10.0).round() / 10.0).collect::<Vec<_>>(),
+        "days": data.len(),
+        "mean_abs_error": mae.round(),
+    }))
+}
+
 fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Value> {
     engineer(&mut rows);
+    let steps = fit_steps(&rows);
 
     // calibration
     let mut weights = Map::new();
@@ -1006,6 +1098,7 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
             "n_days": days_used,
             "weights": weights,
             "contributors": contributors,
+            "steps": steps,
         },
     });
     let out = path(db);
@@ -1019,6 +1112,7 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
         "calibrated": calibrated,
         "calibration_days": days_used,
         "source": source,
+        "steps_calibrated": steps.is_some(),
     }))
 }
 
@@ -1131,7 +1225,10 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
         let mut sleep = String::from("id;contributors;day;score;timestamp\n");
         let mut ready = String::from("id;contributors;day;score;temperature_deviation;temperature_trend_deviation;timestamp\n");
         let mut periods = String::from("id;average_breath;average_heart_rate;average_hrv;awake_time;bedtime_end;bedtime_start;day;deep_sleep_duration;efficiency;heart_rate;latency;lowest_heart_rate;rem_sleep_duration;time_in_bed;total_sleep_duration;type\n");
-        let mut activity = String::from("id;active_calories;average_met_minutes;contributors;day;score;steps\n");
+        let mut activity = String::from("id;active_calories;average_met_minutes;contributors;day;met;score;steps\n");
+        // True steps per minute per MET bin, to be recovered by `fit_steps`.
+        const TRUE_RATES: [f64; 7] = [0.0, 4.0, 25.0, 95.0, 112.0, 140.0, 160.0];
+        const BIN_MET: [f64; 7] = [1.7, 2.2, 2.7, 3.5, 5.0, 7.0, 9.0];
         for i in 0..days {
             let day = format!("2025-{:02}-{:02}", 1 + (i / 28) % 12, 1 + i % 28);
             let f = i as f64;
@@ -1162,7 +1259,22 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
                     deep = total * 0.15, rem = rem_s, hr = hr.join(", ")
                 ));
             }
-            activity.push_str(&format!("a{i};300;1.5;\"{{}}\";{day};80;{}\n", 6000 + i * 13));
+            // A day of 1440 one-minute MET values: mostly rest, then varying minutes per bin.
+            let mut mets: Vec<String> = Vec::new();
+            let mut steps = 0.0;
+            for (b, met) in BIN_MET.iter().enumerate() {
+                let minutes = 10 + (i * (b + 3) * 7) % 90;
+                steps += minutes as f64 * TRUE_RATES[b];
+                mets.extend(std::iter::repeat(format!("{met}")).take(minutes));
+            }
+            while mets.len() < 1440 {
+                mets.push("1.0".into());
+            }
+            activity.push_str(&format!(
+                "a{i};300;1.5;\"{{}}\";{day};\"{{\"\"interval\"\": 60.0, \"\"items\"\": [{}]}}\";80;{}\n",
+                mets.join(", "),
+                steps.round()
+            ));
         }
         vec![
             ("dailysleep.csv".into(), sleep),
@@ -1184,8 +1296,15 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
         let stored = load(&db).unwrap();
         // The main sleep wins over the afternoon nap.
         assert_eq!(stored["history"]["2025-01-01"]["asleep_s"], 21_600.0);
-        assert_eq!(stored["history"]["2025-01-01"]["steps"], 6000.0);
         let params = &stored["params"];
+        // Steps per minute per MET level are recovered from the per-minute activity.
+        assert_eq!(result["steps_calibrated"], true);
+        let rates: Vec<f64> = params["steps"]["rates"].as_array().unwrap().iter().filter_map(Value::as_f64).collect();
+        for (fitted, truth) in rates.iter().zip([0.0, 4.0, 25.0, 95.0, 112.0, 140.0, 160.0]) {
+            assert!((fitted - truth).abs() < 1.0, "{rates:?}");
+        }
+        assert!((step_rate(Some(params), 3.5) - 95.0).abs() < 1.0);
+        assert_eq!(step_rate(None, 1.2), 0.0);
         // Sleep weights are learned from the contributors: the generator used 35/15/10…
         let w = &params["weights"][SLEEP];
         assert!((w["Total Sleep Score"].as_f64().unwrap() - 35.0).abs() < 1.0, "{w}");

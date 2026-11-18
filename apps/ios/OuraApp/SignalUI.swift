@@ -126,6 +126,8 @@ struct SignalTile: View {
 
 /// The bottom bar: five tabs and the green + button that opens the log sheet.
 struct SignalTabBar: View {
+    /// Height of the bar above the home indicator; pages reserve this much space.
+    static let height: CGFloat = 72
     @Binding var tab: AppTab
     var onPlus: () -> Void
 

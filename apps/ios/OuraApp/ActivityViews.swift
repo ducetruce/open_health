@@ -683,6 +683,8 @@ struct ActivityTab<Header: View>: View {
     @State private var showStart = false
     @State private var showLog = false
     @State private var showGoals = false
+    /// The history opened by tapping a ring (steps or active calories).
+    @State private var history: TrendMetric?
     @State private var selected: WorkoutSession?
     @State private var goalsVersion = 0
 
@@ -719,6 +721,7 @@ struct ActivityTab<Header: View>: View {
         .sheet(isPresented: $showStart) { StartWorkoutSheet() }
         .sheet(isPresented: $showLog) { LogWorkoutSheet(day: day) }
         .sheet(isPresented: $showGoals) { GoalsSheet { goalsVersion += 1 } }
+        .sheet(item: $history) { metric in TrendDetailView(s: s, metric: metric, initialPeriod: .month) }
         .sheet(item: $selected) { w in WorkoutDetailView(session: w, summary: s) }
     }
 
@@ -729,12 +732,21 @@ struct ActivityTab<Header: View>: View {
         let mins = s.workoutsOn(day).reduce(0) { $0 + $1.durationMin }
         return VStack(spacing: 12) {
             HStack {
-                ScoreRing(value: kcal.map { Fmt.count($0) } ?? "–", caption: "active kcal",
-                          progress: kcal.map { $0 / ActivityGoals.activeKcal }, accent: Obs.activityAccent, size: 96)
+                // Tapping either ring opens its full history in Trends' detail view.
+                Button { history = .activeKcal } label: {
+                    ScoreRing(value: kcal.map { Fmt.count($0) } ?? "–", caption: "active kcal",
+                              progress: kcal.map { $0 / ActivityGoals.activeKcal }, accent: Obs.activityAccent, size: 96)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows your active calorie history")
                 Spacer()
-                ScoreRing(value: steps.map { Fmt.count($0) } ?? "–",
-                          caption: "steps (est.)",
-                          progress: steps.map { $0 / ActivityGoals.steps }, accent: Obs.readinessAccent, size: 96)
+                Button { history = .steps } label: {
+                    ScoreRing(value: steps.map { Fmt.count($0) } ?? "–",
+                              caption: "steps (est.)",
+                              progress: steps.map { $0 / ActivityGoals.steps }, accent: Obs.readinessAccent, size: 96)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows your step history")
                 Spacer()
                 ScoreRing(value: "\(mins)", caption: "workout min",
                           progress: Double(mins) / 30, accent: Obs.heartAccent, size: 96)
