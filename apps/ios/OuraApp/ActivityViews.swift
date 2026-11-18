@@ -4,39 +4,50 @@ import SwiftUI
 
 // MARK: - shared bits
 
-/// A circular progress ring with a value in the middle and a caption below.
+/// A circular progress ring with a value in the middle and a caption below: a dim
+/// track of tick marks under a glowing solid arc, the value in the pixel font.
 struct ScoreRing: View {
     let value: String
     let caption: String
     var progress: Double?          // 0…1, nil draws an empty track
-    var accent: Color = Obs.sleepAccent
+    var accent: Color = Obs.signal
     var size: CGFloat = 92
     var lineWidth: CGFloat = 8
+    var showCaption = true
 
     var body: some View {
         VStack(spacing: 8) {
             ZStack {
-                Circle().stroke(accent.opacity(0.16), lineWidth: lineWidth)
+                Circle()
+                    .stroke(Obs.signalDim, style: StrokeStyle(lineWidth: lineWidth * 1.5, dash: [1.5, 4.4]))
+                    .padding(lineWidth * 0.25)
                 if let p = progress {
                     Circle()
                         .trim(from: 0, to: max(0.001, min(1, p)))
-                        .stroke(accent, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .stroke(accent, style: StrokeStyle(lineWidth: lineWidth * 0.7, lineCap: .round))
                         .rotationEffect(.degrees(-90))
+                        .shadow(color: accent.opacity(0.55), radius: 6)
                         .animation(.easeOut(duration: 0.6), value: p)
                 }
                 Text(value)
-                    .font(Obs.rounded(size * 0.27, .bold))
+                    .font(.custom("VT323-Regular", fixedSize: size * 0.5))
                     .foregroundStyle(progress == nil ? Obs.muted : Obs.ink)
-                    .minimumScaleFactor(0.6).lineLimit(1)
-                    .padding(.horizontal, lineWidth + 4)
+                    .shadow(color: progress == nil ? .clear : Obs.signal.opacity(0.6), radius: 7)
+                    .minimumScaleFactor(0.5).lineLimit(1)
+                    .padding(.horizontal, lineWidth + 6)
+                    // The pixel face sits a touch low in its line box.
+                    .offset(y: -size * 0.012)
             }
             .frame(width: size, height: size)
-            Text(caption.uppercased())
-                .font(.system(size: 10, weight: .semibold)).tracking(1)
-                .foregroundStyle(Obs.ink2)
-                .lineLimit(1).minimumScaleFactor(0.8)
+            if showCaption {
+                Text(caption.uppercased())
+                    .font(Obs.label(10)).tracking(1.4)
+                    .foregroundStyle(Obs.ink2)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(caption) \(value)")
     }
 }
 
@@ -59,14 +70,15 @@ struct DayStrip: View {
                         Button { selection = day } label: {
                             VStack(spacing: 4) {
                                 Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
-                                    .font(.system(size: 10, weight: .semibold)).tracking(0.6)
-                                    .foregroundStyle(on ? Obs.paper : Obs.muted)
+                                    .font(Obs.label(10)).tracking(1)
+                                    .foregroundStyle(on ? Obs.onSignal : Obs.muted)
                                 Text(String(day.suffix(2)))
-                                    .font(Obs.rounded(17, .semibold))
-                                    .foregroundStyle(on ? Obs.paper : Obs.ink)
+                                    .font(Obs.pixel(17))
+                                    .foregroundStyle(on ? Obs.onSignal : Obs.ink)
                             }
                             .frame(width: 46, height: 56)
-                            .background(on ? Obs.ink : Obs.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(on ? Obs.signal : Obs.card, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(on ? Obs.signal : Obs.rule, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .id(day)
@@ -93,16 +105,34 @@ struct AppHeader<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 if let subtitle {
                     Text(subtitle.uppercased())
-                        .font(.system(size: 11, weight: .semibold)).tracking(1.1)
+                        .font(Obs.label(11)).tracking(1.8)
                         .foregroundStyle(Obs.muted)
                 }
-                Text(title).font(.system(size: 30, weight: .bold)).foregroundStyle(Obs.ink)
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text(title).font(Obs.pixel(32)).foregroundStyle(Obs.ink)
+                    BlinkingCursor().font(Obs.pixel(32))
+                }
             }
             Spacer()
             trailing()
         }
         .padding(.horizontal, 20)
         .padding(.top, 8)
+    }
+}
+
+/// A terminal-style "_" that blinks once a second.
+struct BlinkingCursor: View {
+    @State private var on = true
+    var body: some View {
+        Text("_").foregroundStyle(Obs.signal).opacity(on ? 1 : 0)
+            .accessibilityHidden(true)
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(550))
+                    on.toggle()
+                }
+            }
     }
 }
 
@@ -133,7 +163,7 @@ struct WorkoutRow: View {
                         .font(.system(size: 16, weight: .semibold)).foregroundStyle(Obs.ink)
                     if let badge {
                         Text(badge.uppercased())
-                            .font(.system(size: 9, weight: .bold)).tracking(0.8)
+                            .font(Obs.label(9)).tracking(0.8)
                             .foregroundStyle(Obs.ink2)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Obs.cardHigh, in: Capsule())
@@ -167,7 +197,7 @@ struct LiveWorkoutCard: View {
             HStack(spacing: 8) {
                 Circle().fill(Obs.alert).frame(width: 8, height: 8)
                 Text("WORKOUT IN PROGRESS")
-                    .font(.system(size: 11, weight: .bold)).tracking(1.1).foregroundStyle(Obs.activityAccent)
+                    .font(Obs.label(11)).tracking(1.1).foregroundStyle(Obs.activityAccent)
                 Spacer()
                 Menu {
                     Picker("Type", selection: Binding(get: { active.kind }, set: { store.changeActiveKind($0) })) {
@@ -577,7 +607,7 @@ struct StatTile: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
-                Text(label.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(0.8)
+                Text(label.uppercased()).font(Obs.label(10)).tracking(0.8)
                     .foregroundStyle(Obs.muted).lineLimit(1).minimumScaleFactor(0.8)
             }
             HStack(alignment: .firstTextBaseline, spacing: 4) {

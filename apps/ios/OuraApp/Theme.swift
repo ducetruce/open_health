@@ -1,10 +1,11 @@
 import SwiftUI
 import UIKit
 
-// Night-sky dark theme: deep navy canvas, raised cards, white type, and one accent
-// hue per domain (sleep indigo, activity amber, readiness teal, heart rose). Status
-// colors stay semantic: green when something is genuinely good, amber/red when not.
-// The app always runs dark (`.preferredColorScheme(.dark)` on the root).
+// Signal theme: a near-black terminal canvas, thin-bordered cards and one mint-green
+// accent. Numbers and titles use a pixel terminal font (VT323), labels a technical
+// monospace (Share Tech Mono); body copy stays in the system font for readability.
+// Every domain shares the green accent. Amber and red are kept for genuine problems,
+// so a warning never reads as "good". The app always runs dark.
 
 enum Obs {
     private static func hex(_ v: UInt32, _ alpha: CGFloat = 1) -> Color {
@@ -18,26 +19,31 @@ enum Obs {
     private static func adaptive(light: UInt32, dark: UInt32) -> Color { hex(dark) }
 
     // Surfaces and type.
-    static let paper = hex(0x0b0f1c)       // canvas
-    static let card = hex(0x161c2e)        // raised card
-    static let cardHigh = hex(0x1f2740)    // pressed / selected / inset
-    static let ink = hex(0xf3f5fa)
-    static let ink2 = hex(0xc3c9d8)
-    static let muted = hex(0x8990a6)
-    static let link = hex(0xdfe5f2)
-    static let rule = hex(0x262e47)
+    static let paper = hex(0x090b0a)       // canvas
+    static let card = hex(0x0d100e)        // card
+    static let cardHigh = hex(0x16201a)    // pressed / selected / inset
+    static let ink = hex(0xe4f2e8)
+    static let ink2 = hex(0xa9b3ac)
+    static let muted = hex(0x8e9a91)
+    static let link = hex(0x72f0a0)
+    static let rule = hex(0x1f2b23)
+    /// The one accent, plus a dimmer border shade of it.
+    static let signal = hex(0x72f0a0)
+    static let signalDim = hex(0x2c5a3c)
+    /// Text on a filled signal-green surface.
+    static let onSignal = hex(0x07140c)
 
     // Diagrams sit in a cool gray-blue; status colors are semantic.
-    static let chart = hex(0x9fb0d6)
-    static let good = hex(0x4fd1a5)
-    static let bad = hex(0xf2a65a)
+    static let chart = hex(0x4fb57a)
+    static let good = hex(0x72f0a0)
+    static let bad = hex(0xe8b45a)
     static let alert = hex(0xef6b6b)
 
     // Domain accents.
-    static let sleepAccent = hex(0x8f8cff)
-    static let activityAccent = hex(0xf5a65b)
-    static let readinessAccent = hex(0x56c6d9)
-    static let heartAccent = hex(0xf27c8a)
+    static let sleepAccent = hex(0x72f0a0)
+    static let activityAccent = hex(0x72f0a0)
+    static let readinessAccent = hex(0x72f0a0)
+    static let heartAccent = hex(0x72f0a0)
 
     // Back-compat names. `teal` is the quiet chart color; `yellow` is a problem.
     static var teal: Color { chart }
@@ -49,16 +55,15 @@ enum Obs {
     static var trace: Color { rule }
 
     static var canvas: some View {
-        LinearGradient(colors: [hex(0x18203d), paper, paper], startPoint: .top, endPoint: .bottom)
-            .ignoresSafeArea()
+        paper.ignoresSafeArea()
     }
 
-    // Sleep stages keep distinct hues (deep / light / REM / wake). Other charts
-    // stay gray unless a value is actually good or a problem.
-    static let deep = hex(0x5b5fe0)
-    static let light = hex(0x9db4f5)
-    static let rem = hex(0x58c9e6)
-    static let wake = hex(0xf2c35b)
+    // Sleep stages are shades of the accent that differ in lightness, so they stay
+    // distinguishable without relying on hue (deep brightest, light darkest, wake white).
+    static let deep = hex(0x9cffc0)
+    static let light = hex(0x2a6b45)
+    static let rem = hex(0x4fb57a)
+    static let wake = hex(0xe4f2e8)
     static func stage(_ s: Int) -> Color {
         switch s { case 1: return deep; case 2: return light; case 3: return rem; default: return wake }
     }
@@ -81,16 +86,28 @@ enum Obs {
         }
     }
 
-    /// Display titles: clean sans, a touch heavier than body text.
-    static func serif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight == .regular ? .semibold : weight, design: .default)
+    /// The pixel terminal face draws small for its point size; this scales it so a
+    /// value asked for at `size` looks about as large as the system font would.
+    static let pixelScale: CGFloat = 1.32
+
+    /// Large numbers and screen titles: pixel terminal font.
+    static func pixel(_ size: CGFloat) -> Font {
+        .custom("VT323-Regular", fixedSize: size * pixelScale)
     }
-    /// Numbers and compact labels: sans with tabular digits, so columns still align.
+    /// Display titles.
+    static func serif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font { pixel(size) }
+    /// Numbers and compact labels: technical monospace (every glyph the same width,
+    /// so columns of figures align).
+    /// Large figures (22 pt and up) switch to the pixel face, so every headline
+    /// number on every screen reads as the terminal display.
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .default).monospacedDigit()
+        size >= 22 ? pixel(size) : .custom("ShareTechMono-Regular", fixedSize: size)
     }
-    static func rounded(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .rounded).monospacedDigit()
+    /// Big headline numbers.
+    static func rounded(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font { pixel(size) }
+    /// Small uppercase labels.
+    static func label(_ size: CGFloat = 11) -> Font {
+        .custom("ShareTechMono-Regular", fixedSize: size)
     }
     static func prose(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
@@ -109,8 +126,8 @@ struct ObsTag: View {
                     .foregroundStyle(Obs.muted)
             }
             Text(text.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(1.1)
+                .font(Obs.label(11))
+                .tracking(1.8)
                 .foregroundStyle(Obs.muted)
         }
     }
@@ -128,14 +145,29 @@ struct ObsCard: ViewModifier {
     var padding: CGFloat = 18
     var radius: CGFloat = 18
     func body(content: Content) -> some View {
+        // Square-ish terminal panels whatever radius a caller asks for.
+        let shape = RoundedRectangle(cornerRadius: min(radius, 4), style: .continuous)
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Obs.card, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
-            )
+            .background { shape.fill(Obs.card).overlay(Scanlines().clipShape(shape)) }
+            .overlay(shape.strokeBorder(Obs.rule, lineWidth: 1))
+    }
+}
+
+/// Faint horizontal scanlines, like an old green-screen monitor.
+struct Scanlines: View {
+    var body: some View {
+        Canvas { ctx, size in
+            var y: CGFloat = 0
+            while y < size.height {
+                ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
+                         with: .color(Obs.signal.opacity(0.03)))
+                y += 3
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

@@ -183,6 +183,10 @@ client re-derives packet timing at all — tracked as a follow-up.
 
 ## Known gaps (iOS-only, not yet on the web)
 
+- **Signal (terminal) visual design**: iOS only. Near-black canvas, one mint-green accent,
+  VT323 pixel font for numbers and titles, Share Tech Mono labels, digital-rain hero card,
+  pixel-block bar charts, custom tab bar with a + log sheet (`SignalUI.swift`, `Theme.swift`).
+  The web dashboard keeps its own look; the owner of this fork uses only the iOS app.
 - **Readiness score** (`nights[].readiness`, `oura-summary/src/readiness.rs`): in the
   summary JSON for both clients, rendered only on iOS (Today rings, readiness card, Trends,
   All days). The web dashboard does not show it yet.

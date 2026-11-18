@@ -165,7 +165,7 @@ struct AllDaysView: View {
         VStack(spacing: 1) {
             Text(value.map { "\(Int($0))" } ?? "–")
                 .font(Obs.mono(15, .semibold)).foregroundStyle(value == nil ? Obs.muted : color)
-            Text(label.uppercased()).font(.system(size: 8, weight: .semibold)).tracking(0.6)
+            Text(label.uppercased()).font(Obs.label(8)).tracking(0.6)
                 .foregroundStyle(Obs.muted)
         }
         .frame(minWidth: 34)
@@ -889,6 +889,8 @@ struct RootView: View {
     @State private var readinessExpanded = false
     @State private var showStartWorkout = false
     @State private var showLogWorkout = false
+    @State private var showLogMenu = false
+    @State private var pendingLog: LogChoice?
     private func f(_ v: Double?, _ fallback: String = "–") -> String {
         v.map { "\(Int($0))" } ?? fallback
     }
@@ -930,6 +932,12 @@ struct RootView: View {
         .sheet(isPresented: $showAllDays) { if let s { AllDaysView(s: s.withUserWorkouts(workouts)) } }
         .sheet(isPresented: $showStartWorkout) { StartWorkoutSheet() }
         .sheet(isPresented: $showLogWorkout) { LogWorkoutSheet() }
+        .sheet(isPresented: $showLogMenu, onDismiss: openPendingLog) {
+            LogMenuSheet(lastSync: ring.lastSuccessfulSyncAt.map { "Last synced " + $0.formatted(date: .omitted, time: .shortened) }) { choice in
+                pendingLog = choice
+                showLogMenu = false
+            }
+        }
         .onChange(of: workouts.workouts) { _, _ in
             if let s, s.error == nil { HealthExport.shared.push(s.withUserWorkouts(workouts)) }
         }
@@ -1121,26 +1129,40 @@ struct RootView: View {
 
     // MARK: - tabs
 
+    /// Opens what was picked in the + sheet once that sheet has gone.
+    private func openPendingLog() {
+        guard let choice = pendingLog else { return }
+        pendingLog = nil
+        switch choice {
+        case .startWorkout: showStartWorkout = true
+        case .logWorkout: showLogWorkout = true
+        case .sync: showSync = true
+        }
+    }
+
     @ViewBuilder private func content(_ base: Summary) -> some View {
         let s = base.withUserWorkouts(workouts)
         TabView(selection: $tab) {
             tabPage { todayTab(s) }
-                .tabItem { Label("Today", systemImage: "house.fill") }.tag(AppTab.today)
+                .tabItem { Label("Today", systemImage: "house.fill") }.tag(AppTab.today).toolbar(.hidden, for: .tabBar)
             tabPage { sleepTab(s) }
-                .tabItem { Label("Sleep", systemImage: "moon.fill") }.tag(AppTab.sleep)
+                .tabItem { Label("Sleep", systemImage: "moon.fill") }.tag(AppTab.sleep).toolbar(.hidden, for: .tabBar)
             ActivityTab(s: s, onEndWorkout: finishWorkout) {
                 AppHeader(title: "Activity", subtitle: busyLabel) { headerButtons }
             }
             .background(Obs.canvas)
-            .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity)
+            .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity).toolbar(.hidden, for: .tabBar)
             TrendsTab(s: s) {
                 AppHeader(title: "Trends", subtitle: busyLabel) { headerButtons }
             }
-            .tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag(AppTab.trends)
+            .tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag(AppTab.trends).toolbar(.hidden, for: .tabBar)
             tabPage { vitalsTab(s) }
-                .tabItem { Label("Vitals", systemImage: "heart.text.square.fill") }.tag(AppTab.vitals)
+                .tabItem { Label("Vitals", systemImage: "heart.text.square.fill") }.tag(AppTab.vitals).toolbar(.hidden, for: .tabBar)
         }
-        .tint(Obs.ink)
+        .tint(Obs.signal)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            SignalTabBar(tab: $tab) { showLogMenu = true }
+        }
     }
 
     private func tabPage<C: View>(@ViewBuilder _ c: () -> C) -> some View {
@@ -1197,84 +1219,26 @@ struct RootView: View {
             let day = s.days.first ?? localDay()
             let night = s.night(forDay: day) ?? s.nights.first
             let st = s.activity_daily[localDay()] ?? s.activity_daily[day]
-            VStack(alignment: .leading, spacing: 18) {
-                // headline rings: readiness, sleep score, progress toward activity goals
-                HStack {
-                    Button { readinessExpanded.toggle() } label: {
-                        ScoreRing(value: night?.readiness.map { "\(Int($0.score))" } ?? "–", caption: "readiness",
-                                  progress: night?.readiness.map { $0.score / 100 }, accent: Obs.readinessAccent)
-                    }
-                    Spacer()
-                    Button { tab = .sleep } label: {
-                        ScoreRing(value: night?.mainSleepScore.map { "\(Int($0.score))" } ?? "–", caption: "sleep",
-                                  progress: night?.mainSleepScore.map { $0.score / 100 }, accent: Obs.sleepAccent)
-                    }
-                    Spacer()
-                    Button { tab = .activity } label: {
-                        let goal = activityGoalProgress(st)
-                        ScoreRing(value: goal.map { "\(Int(($0 * 100).rounded()))%" } ?? "–", caption: "activity goal",
-                                  progress: goal, accent: Obs.activityAccent)
-                    }
-                }
-                .buttonStyle(.plain)
-                .obsCard(padding: 20)
-
-                if let readiness = night?.readiness {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Button { readinessExpanded.toggle() } label: {
-                            HStack {
-                                ObsTag("readiness", icon: "bolt.heart.fill")
-                                Spacer()
-                                Image(systemName: readinessExpanded ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Obs.muted)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        if readinessExpanded {
-                            SleepScoreCard(score: readiness, framed: false)
-                            if readiness.provisional == true {
-                                Text("Readiness compares each night with your own recent nights. It becomes settled after about two weeks of synced nights.")
-                                    .font(.system(size: 13)).foregroundStyle(Obs.ink2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        } else {
-                            Text(readinessSummary(readiness))
-                                .font(.system(size: 14)).foregroundStyle(Obs.ink2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .obsCard()
-                } else if night != nil {
-                    Text("Readiness appears after a few nights have been synced: it compares each night with your own baseline.")
-                        .font(.system(size: 14)).foregroundStyle(Obs.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .obsCard()
-                }
-
-                if let d = s.digest {
-                    Text(d).font(.system(size: 16)).foregroundStyle(Obs.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .obsCard()
-                }
+            VStack(alignment: .leading, spacing: 14) {
+                readinessHero(s, night: night, st: st)
 
                 if let active = workouts.active {
                     LiveWorkoutCard(active: active, onEnd: finishWorkout)
-                } else {
-                    WorkoutActions(onStart: { showStartWorkout = true }, onLog: { showLogWorkout = true })
                 }
+
+                todaySignals(s, night: night)
 
                 if let day = s.days.first {
                     HStack(spacing: 9) {
-                        ObsTag(displayedDayLabel(day), icon: "sun.max.fill").fixedSize()
+                        ObsTag(displayedDayLabel(day)).fixedSize()
                         if displayedDayLabel(day) != day {
                             Text(Fmt.day(day)).font(Obs.mono(11)).foregroundStyle(Obs.muted)
                         }
                         if ring.busy || isRefreshingSummary {
-                            ProgressView().controlSize(.mini).tint(Obs.ink)
+                            ProgressView().controlSize(.mini).tint(Obs.signal)
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 10)
                     TodayCard(s: s, day: day,
                               onSleep: { report = ReportSel(day: day, sleep: true) },
                               onActivity: { report = ReportSel(day: day, sleep: false) })
@@ -1284,20 +1248,187 @@ struct RootView: View {
                     SleepDebtCard(debt: debt) { showSleepDebt = true }.obsCard()
                 }
 
-                if !s.days.isEmpty {
-                    Button { showAllDays = true } label: {
-                        HStack {
-                            ObsTag("history", icon: "calendar")
-                            Text("\(s.days.count) days").font(Obs.mono(12)).foregroundStyle(Obs.muted)
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Obs.muted)
-                        }.contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .obsCard()
+                weekStrip(s)
+            }
+            .padding(.horizontal, 18)
+        }
+    }
+
+    // MARK: Today pieces
+
+    private func readinessBand(_ score: Double) -> String {
+        switch score {
+        case 85...: return "Optimal"
+        case 70..<85: return "Good"
+        case 60..<70: return "Fair"
+        default: return "Pay attention"
+        }
+    }
+
+    private func readinessHeadline(_ score: Double) -> String {
+        switch score {
+        case 85...: return "Ready for a harder day"
+        case 70..<85: return "Ready for a normal day"
+        case 60..<70: return "Take it a bit easier"
+        default: return "Put recovery first today"
+        }
+    }
+
+    /// The hero panel: the readiness ring, what it means, its contributors on demand,
+    /// and a footer linking to sleep, activity and sleep debt.
+    @ViewBuilder private func readinessHero(_ s: Summary, night: NightRow?, st: DailyStat?) -> some View {
+        let readiness = night?.readiness
+        let goal = activityGoalProgress(st)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                ObsTag("Readiness")
+                Spacer()
+                if readiness?.provisional == true {
+                    Text("PROVISIONAL").font(Obs.label(10)).tracking(1.6).foregroundStyle(Obs.signal)
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 18).padding(.top, 18)
+
+            HStack(alignment: .center, spacing: 16) {
+                Button { readinessExpanded.toggle() } label: {
+                    ScoreRing(value: readiness.map { "\(Int($0.score))" } ?? "–", caption: "readiness",
+                              progress: readiness.map { $0.score / 100 }, size: 128, lineWidth: 7, showCaption: false)
+                }
+                .buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 9) {
+                    if let r = readiness {
+                        SignalBadge(text: readinessBand(r.score))
+                        Text(readinessHeadline(r.score))
+                            .font(.system(size: 19, weight: .medium)).foregroundStyle(Obs.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(s.digest ?? readinessSummary(r))
+                            .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button { withAnimation(.easeOut(duration: 0.2)) { readinessExpanded.toggle() } } label: {
+                            Text(readinessExpanded ? "HIDE CONTRIBUTORS" : "VIEW CONTRIBUTORS ›")
+                                .font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.ink)
+                                .padding(.vertical, 6).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(night == nil ? "Wear your ring to bed, then sync in the morning."
+                                          : "Readiness appears after a few nights have been synced: it compares each night with your own baseline.")
+                            .font(.system(size: 14)).foregroundStyle(Obs.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(18)
+
+            if readinessExpanded, let r = readiness {
+                VStack(alignment: .leading, spacing: 12) {
+                    SleepScoreCard(score: r, framed: false)
+                    if r.provisional == true {
+                        Text("Readiness compares each night with your own recent nights. It becomes settled after about two weeks of synced nights.")
+                            .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 18).padding(.bottom, 18)
+            }
+
+            HStack(spacing: 0) {
+                heroFooter("Sleep", night?.mainSleepScore.map { "\(Int($0.score))" }) { tab = .sleep }
+                Rectangle().fill(Obs.rule).frame(width: 1)
+                heroFooter("Activity", goal.map { "\(Int(($0 * 100).rounded()))%" }) { tab = .activity }
+                Rectangle().fill(Obs.rule).frame(width: 1)
+                heroFooter("Sleep debt", s.sleepDebt.map { Fmt.duration(minutes: $0.debt_min) }) { showSleepDebt = true }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .overlay(alignment: .top) { Rectangle().fill(Obs.rule).frame(height: 1) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { RoundedRectangle(cornerRadius: 4).fill(Obs.card).overlay(DigitalRain().overlay(Scanlines())) }
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.rule, lineWidth: 1))
+        .overlay(alignment: .topLeading) { Rectangle().fill(Obs.signal).frame(width: 72, height: 2) }
+    }
+
+    private func heroFooter(_ label: String, _ value: String?, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label.uppercased()).font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                Text(value ?? "–").font(Obs.mono(15)).foregroundStyle(Obs.ink)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func signedPercent(_ v: Double?) -> String? {
+        guard let v else { return nil }
+        return String(format: "%+.0f%% vs base", v)
+    }
+
+    /// Resting heart rate, HRV and blood oxygen for the latest night, with the last
+    /// two weeks as pixel bars.
+    @ViewBuilder private func todaySignals(_ s: Summary, night: NightRow?) -> some View {
+        let recent = Array(s.nights.prefix(14).reversed())
+        let rhrSeries = recent.compactMap(\.rhr)
+        let hrvSeries = Array(s.vitals.hrv.series.suffix(14))
+        let spo2Series = recent.compactMap(\.spo2_mean)
+        let spo2 = night?.spo2_mean ?? s.nights.first { $0.spo2_mean != nil }?.spo2_mean
+        VStack(alignment: .leading, spacing: 6) {
+            Text("OVERNIGHT · VS YOUR BASELINE").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+            Text("Today’s signals").font(Obs.pixel(24)).foregroundStyle(Obs.ink)
+        }
+        .padding(.top, 16)
+        HStack(spacing: 8) {
+            SignalTile(name: "Resting HR", index: "01",
+                       value: f(night?.rhr ?? s.vitals.rhr.latest), unit: "bpm", series: rhrSeries,
+                       note: s.vitals.rhr.delta_pct.map { abs($0) < 3 ? "At baseline" : String(format: "%+.0f%% vs base", $0) } ?? "Baseline building") { tab = .vitals }
+            SignalTile(name: "HRV", index: "02",
+                       value: f(s.vitals.hrv.latest ?? night?.hrv_ms), unit: "ms", series: hrvSeries,
+                       note: signedPercent(s.vitals.hrv.delta_pct) ?? "Baseline building") { vital = .hrv }
+            SignalTile(name: "Blood O₂", index: "03",
+                       value: f(spo2), unit: "%", series: spo2Series,
+                       note: spo2.map { $0 >= 95 ? "Normal" : "Below 95%" } ?? "No reading yet") { tab = .vitals }
+        }
+    }
+
+    /// The last seven days as buttons showing each day's readiness.
+    @ViewBuilder private func weekStrip(_ s: Summary) -> some View {
+        let days = Array(s.days.prefix(7).reversed())
+        if !days.isEmpty {
+            HStack {
+                Text("PAST 7 DAYS · READINESS").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+                Spacer()
+                Button { showAllDays = true } label: {
+                    Text("ALL \(s.days.count) DAYS ›").font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.signal)
+                        .padding(.vertical, 8).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 16)
+            HStack(spacing: 4) {
+                ForEach(days, id: \.self) { day in
+                    let last = day == days.last
+                    let score = s.night(forDay: day)?.readiness?.score ?? s.imported_history[day]?.readiness
+                    let date = WorkoutFormat.day.date(from: day)
+                    Button { report = ReportSel(day: day, sleep: true) } label: {
+                        VStack(spacing: 6) {
+                            Text(date.map { $0.formatted(.dateTime.weekday(.abbreviated)).uppercased() } ?? "")
+                                .font(Obs.label(10))
+                            Text(String(day.suffix(2))).font(Obs.pixel(18))
+                            Text(score.map { "\(Int($0))" } ?? "–").font(Obs.mono(11))
+                        }
+                        .foregroundStyle(last ? Obs.onSignal : Obs.ink2)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .background(last ? Obs.signal : Color.clear, in: Capsule())
+                        .overlay(Capsule().strokeBorder(last ? Obs.signal : Obs.rule, lineWidth: 1))
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(Fmt.day(day)), readiness \(score.map { "\(Int($0))" } ?? "not available")")
+                }
+            }
         }
     }
 

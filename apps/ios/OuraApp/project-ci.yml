@@ -54,6 +54,7 @@ targets:
       - path: Theme.swift
       - path: Units.swift
       - path: TrendsView.swift
+      - path: SignalUI.swift
       - path: BackgroundSync.swift
       - path: BLETransport.swift
       - path: RingSync.swift
@@ -67,6 +68,10 @@ targets:
       - path: HealthExport.swift
       - path: ../generated/oura_core.swift
       - path: Assets.xcassets
+      - path: Fonts/VT323-Regular.ttf
+        buildPhase: resources
+      - path: Fonts/ShareTechMono-Regular.ttf
+        buildPhase: resources
     dependencies:
       - sdk: HealthKit.framework
       - framework: ../OuraCore.xcframework

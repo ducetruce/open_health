@@ -86,6 +86,7 @@ targets:
       - path: Theme.swift
       - path: Units.swift
       - path: TrendsView.swift
+      - path: SignalUI.swift
       - path: BackgroundSync.swift
       - path: BLETransport.swift
       - path: RingSync.swift
@@ -109,6 +110,10 @@ targets:
       - path: HealthExport.swift
       - path: ../generated/oura_core.swift
       - path: Assets.xcassets
+      - path: Fonts/VT323-Regular.ttf
+        buildPhase: resources
+      - path: Fonts/ShareTechMono-Regular.ttf
+        buildPhase: resources
       # bundled models + data (gitignored local files). oura.db is temporary until the
       # on-device BLE sync lands — then the app builds its own DB from your ring.
       # NSSA sleep stager + its tree-ensemble classifier (tools/extract_nssa_classifier.py)
