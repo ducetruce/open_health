@@ -1198,7 +1198,7 @@ struct IllnessCard: View {
             let flagged = illness.biomarkers.filter(\.indicatesSymptoms).count
             return flagged == 0
                 ? "Your overnight biometrics are within their usual ranges."
-                : "\(flagged == 1 ? "One overnight biometric is" : "\(flagged) overnight biometrics are") outside your usual range, but together they don’t match the pattern of your body fighting something."
+                : "\(flagged == 1 ? "One overnight biometric was" : "\(flagged) overnight biometrics were") outside your usual range last night. A single night like this is common after a late meal, alcohol or a warm room; the radar flags it if it continues."
         case "MINOR_SIGNS": return "Some overnight biometrics are outside your usual ranges."
         case "MAJOR_SIGNS": return "Several overnight biometrics are outside your usual ranges."
         case "MISSING_LAST_NIGHT_SLEEP": return "Wear your ring overnight, then sync to see your latest result."

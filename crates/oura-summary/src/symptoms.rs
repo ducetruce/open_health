@@ -33,6 +33,39 @@ use serde_json::{json, Value};
 
 /// Nights of history required before any judgement is offered.
 pub const MIN_BASELINE_NIGHTS: usize = 7;
+/// The baseline is the most recent this-many nights before the one judged, so it
+/// follows slow, seasonal drift instead of averaging over every night ever synced.
+pub const BASELINE_WINDOW: usize = 60;
+
+/// The radar's verdict for the latest night in `nights` (oldest first, keyed by wake
+/// date), each night judged against the [`BASELINE_WINDOW`] nights before it.
+///
+/// One night out of range is usually a late meal, alcohol or a warm room, so signs are
+/// only reported when the night before was off too; a lone night reads as no signs,
+/// with its out-of-range biomarkers still listed and `single_night: true`.
+pub fn radar(nights: &[(String, NightBiomarkers)]) -> Value {
+    let Some(((date, tonight), earlier)) = nights.split_last() else { return Value::Null };
+    let window = |before: &[(String, NightBiomarkers)]| -> Vec<NightBiomarkers> {
+        before[before.len().saturating_sub(BASELINE_WINDOW)..].iter().map(|(_, m)| *m).collect()
+    };
+    let mut verdict = symptom_signs(*tonight, &window(earlier), date);
+    if verdict["decision"].as_i64().unwrap_or(0) == 0 {
+        return verdict;
+    }
+    let night_before_off = earlier
+        .split_last()
+        .map(|((d, prev), before)| symptom_signs(*prev, &window(before), d)["decision"].as_i64().unwrap_or(0) >= 1)
+        .unwrap_or(false);
+    if night_before_off {
+        verdict["consecutive_nights"] = json!(2);
+    } else {
+        verdict["single_night"] = json!(true);
+        verdict["decision"] = json!(0);
+        verdict["status"] = json!("NO_SIGNS");
+        verdict["trafficLight"] = json!("NO_SIGNS");
+    }
+    verdict
+}
 
 /// Robust z beyond which a biomarker counts as deviating. ~2 robust SD: rare enough on
 /// a normal night not to cry wolf every week.
@@ -219,6 +252,29 @@ pub fn symptom_signs(tonight: NightBiomarkers, history: &[NightBiomarkers], date
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dated(nights: Vec<NightBiomarkers>) -> Vec<(String, NightBiomarkers)> {
+        nights.into_iter().enumerate().map(|(i, n)| (format!("2026-01-{:02}", i + 1), n)).collect()
+    }
+
+    fn feverish() -> NightBiomarkers {
+        NightBiomarkers { skin_temp: Some(36.2), lowest_hr: Some(58.0), hrv_ms: Some(40.0), breath_rate: Some(17.5) }
+    }
+
+    #[test]
+    fn one_bad_night_is_watched_two_are_flagged() {
+        let mut nights = steady(20);
+        nights.push(feverish());
+        let once = radar(&dated(nights.clone()));
+        assert_eq!(once["status"], "NO_SIGNS", "{once}");
+        assert_eq!(once["single_night"], true);
+        assert!(once["biomarkers"].as_array().unwrap().iter().any(|b| b["indicatesSymptoms"] == true));
+
+        nights.push(feverish());
+        let twice = radar(&dated(nights));
+        assert_eq!(twice["status"], "MAJOR_SIGNS", "{twice}");
+        assert_eq!(twice["consecutive_nights"], 2);
+    }
 
     fn steady(n: usize) -> Vec<NightBiomarkers> {
         (0..n)

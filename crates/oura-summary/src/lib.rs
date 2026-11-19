@@ -2989,14 +2989,8 @@ pub fn build_summary(
     // Symptom signs for the most recent night, judged against the nights before it.
     // `nights` is oldest-first, so the last entry is tonight and everything before it
     // is the baseline — tonight is deliberately excluded from its own comparison.
-    let symptoms = match nightly_biomarkers.split_last() {
-        Some(((date, tonight), history)) => {
-            let history: Vec<symptoms::NightBiomarkers> =
-                history.iter().map(|(_, marks)| *marks).collect();
-            symptoms::symptom_signs(*tonight, &history, date)
-        }
-        None => Value::Null,
-    };
+    // Recent-window baseline, and signs only when two nights in a row are off.
+    let symptoms = symptoms::radar(&nightly_biomarkers);
 
     let mut activity = activity_raw
         .as_ref()
