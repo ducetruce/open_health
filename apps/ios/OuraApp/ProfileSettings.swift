@@ -291,10 +291,11 @@ struct ProfileSettingsView: View {
                 } header: {
                     Text("Oura history")
                 } footer: {
-                    Text("Pick the unzipped Oura export folder, or its dailysleep, dailyreadiness, sleepmodel and dailyactivity CSVs (an older trends CSV works too). This fits Readiness and Sleep to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
+                    Text("Select these files from the unzipped Oura export: dailysleep, dailyreadiness, sleepmodel, dailyactivity and dailyspo2 (an older trends CSV works too). This fits Readiness and Sleep to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
                 }
                 .fileImporter(isPresented: $choosingExport,
-                              allowedContentTypes: [.folder, .commaSeparatedText, .plainText, .text, .data],
+                              // No `.folder` here: with it, iOS's picker only lets folders be chosen.
+                              allowedContentTypes: [.commaSeparatedText, .plainText, .text, .data],
                               allowsMultipleSelection: true) { result in
                     if case .success(let urls) = result, !urls.isEmpty { importExport(urls) }
                 }
