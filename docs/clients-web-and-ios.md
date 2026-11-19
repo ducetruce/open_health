@@ -183,6 +183,13 @@ client re-derives packet timing at all — tracked as a follow-up.
 
 ## Known gaps (iOS-only, not yet on the web)
 
+- **Daytime stress and resilience** (`oura-summary/src/stress.rs`, summary key `stress`):
+  15-minute windows of still, awake time from quality-gated daytime beats
+  (`green_ibi_quality_event`), heart rate and RMSSD against a 30-day personal baseline,
+  mapped onto Oura's signed scale by distribution matching; day verdicts and a resilience
+  level. The import now also reads `dailystress` / `daytimestress` / `dailyresilience` to
+  fit the scale, cut-offs and resilience lines (`oura_export::fit_stress`). Rendered only
+  on iOS (Today card, `Stress.swift`, a Trends line); the web does not show it yet.
 - **Oura per-type export import** (`oura_export::import_files`, FFI `import_oura_export_files`):
   reads Oura's newer export (dailysleep / dailyreadiness / sleepmodel / dailyactivity /
   dailyspo2 CSVs, semicolon-separated with JSON contributors) as well as the older trends

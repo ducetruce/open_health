@@ -174,7 +174,11 @@ const HISTORY_COLUMNS: &[(&str, &str)] = &[
     ("Steps", "steps"),
     ("Activity Burn", "active_kcal"),
     ("Active Calories", "active_kcal"),
+    ("stress_min", "stress_min"),
+    ("restored_min", "restored_min"),
 ];
+/// Text values kept as history as they are.
+const HISTORY_TEXT: &[&str] = &["stress_summary", "resilience_level"];
 
 pub fn path(db: &Path) -> PathBuf {
     db.with_file_name("oura_export.json")
@@ -662,12 +666,20 @@ enum V2Kind {
     SleepPeriods,
     DailyActivity,
     DailySpo2,
+    DailyStress,
+    DailyResilience,
 }
 
 fn v2_kind(header: &[String]) -> Option<V2Kind> {
     let has = |c: &str| header.iter().any(|h| h == c);
     if !has("day") {
         return None;
+    }
+    if has("stress_high") && has("recovery_high") {
+        return Some(V2Kind::DailyStress);
+    }
+    if has("level") && has("contributors") && !has("score") {
+        return Some(V2Kind::DailyResilience);
     }
     if has("total_sleep_duration") && has("bedtime_start") {
         Some(V2Kind::SleepPeriods)
@@ -738,6 +750,7 @@ fn merge_v2(tables: &[(V2Kind, Vec<Row>)]) -> Vec<Row> {
         for r in rows {
             let Some(day) = ymd_of(&s(r, "day")) else { continue };
             let entry = days.entry(day.clone()).or_insert_with(|| Row::from([("date".to_string(), json!(day))]));
+            let mut texts: Vec<(&str, String)> = Vec::new();
             let mut put = |key: &str, v: Option<f64>| {
                 if let Some(v) = v {
                     entry.insert(key.to_string(), json!(v));
@@ -789,7 +802,24 @@ fn merge_v2(tables: &[(V2Kind, Vec<Row>)]) -> Vec<Row> {
                     let v: Value = serde_json::from_str(&s(r, "spo2_percentage")).unwrap_or(Value::Null);
                     put("SpO2 Average", v["average"].as_f64());
                 }
+                V2Kind::DailyStress => {
+                    put("stress_min", get(r, "stress_high").map(|v| v / 60.0));
+                    put("restored_min", get(r, "recovery_high").map(|v| v / 60.0));
+                    texts.push(("stress_summary", s(r, "day_summary")));
+                }
+                V2Kind::DailyResilience => {
+                    texts.push(("resilience_level", s(r, "level")));
+                    let c = contributors(r);
+                    put("Resilience Sleep Recovery", c["sleep_recovery"].as_f64());
+                    put("Resilience Daytime Recovery", c["daytime_recovery"].as_f64());
+                    put("Resilience Stress", c["stress"].as_f64());
+                }
                 V2Kind::SleepPeriods => {}
+            }
+            for (key, value) in texts {
+                if !value.is_empty() {
+                    entry.insert(key.to_string(), json!(value));
+                }
             }
         }
     }
@@ -862,13 +892,17 @@ pub fn import_files(db: &Path, files: &[(String, String)]) -> Result<Value> {
     let mut trends: Vec<Row> = Vec::new();
     let mut v2: Vec<(V2Kind, Vec<Row>)> = Vec::new();
     let mut unrecognised: Vec<String> = Vec::new();
+    let mut daytime: Vec<Row> = Vec::new();
     for (name, text) in files {
         let table = parse_csv(text);
         let Some(header) = table.first() else {
             unrecognised.push(format!("{name} (empty)"));
             continue;
         };
-        if let Some(kind) = v2_kind(header) {
+        let has = |c: &str| header.iter().any(|h| h == c);
+        if has("timestamp") && has("stress_value") && has("recovery_value") {
+            daytime.extend(table_rows(&table));
+        } else if let Some(kind) = v2_kind(header) {
             v2.push((kind, table_rows(&table)));
         } else if header.iter().any(|h| h == "date") && header.iter().any(|h| known.contains(&h.as_str())) {
             trends.extend(table_rows(&table));
@@ -895,7 +929,7 @@ sleepmodel.csv and dailyactivity.csv from the export (or its trends CSV). Not us
             unrecognised.join("; ")
         ));
     }
-    calibrate_and_store(db, rows, source)
+    calibrate_and_store(db, rows, &daytime, source)
 }
 
 /// Least-squares weights of a score over its contributor sub-scores, in percent,
@@ -1058,8 +1092,9 @@ fn fit_per_minute(rows: &[Row], column: &str) -> Option<Value> {
     }))
 }
 
-fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Value> {
+fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, daytime: &[Row], source: &str) -> Result<Value> {
     engineer(&mut rows);
+    let stress = fit_stress(&rows, daytime);
     let steps = fit_steps(&rows);
     let active_kcal = fit_active_kcal(&rows);
 
@@ -1098,6 +1133,11 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
                 entry.insert((*key).to_string(), json!(v));
             }
         }
+        for key in HISTORY_TEXT {
+            if let Some(v) = r.get(*key).and_then(Value::as_str).filter(|v| !v.is_empty()) {
+                entry.insert((*key).to_string(), json!(v));
+            }
+        }
         if !entry.is_empty() {
             history.insert(day, Value::Object(entry));
         }
@@ -1120,6 +1160,7 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
             "contributors": contributors,
             "steps": steps,
             "active_kcal": active_kcal,
+            "stress": stress,
         },
     });
     let out = path(db);
@@ -1135,7 +1176,202 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
         "source": source,
         "steps_calibrated": steps.is_some(),
         "active_kcal_calibrated": active_kcal.is_some(),
+        "stress_calibrated": stress.is_some(),
     }))
+}
+
+// ── Daytime stress and resilience (see `stress`) ─────────────────────────────
+
+/// Oura's signed 15-minute averages from `daytimestress.csv` (stress +, recovery −),
+/// by UTC window start. Oura's export has been seen with the two value columns
+/// swapped, so the orientation is the one whose stressed windows track the daily
+/// `stress_high` minutes better.
+fn daytime_windows(rows: &[Row], daily: &BTreeMap<String, (f64, f64)>) -> Vec<(i64, f64)> {
+    let pts: Vec<(f64, Option<f64>, Option<f64>)> = rows
+        .iter()
+        .filter_map(|r| {
+            let t = epoch_seconds(r.get("timestamp")?.as_str()?)?;
+            Some((t, get(r, "stress_value"), get(r, "recovery_value")))
+        })
+        .collect();
+    let windows = |swapped: bool| -> Vec<(i64, f64)> {
+        let mut acc: BTreeMap<i64, (f64, usize)> = BTreeMap::new();
+        for (t, s, r) in &pts {
+            let (stress, recovery) = if swapped { (*r, *s) } else { (*s, *r) };
+            let v = match (stress, recovery) {
+                (Some(s), _) => s,
+                (None, Some(r)) => -r,
+                _ => continue,
+            };
+            let e = acc.entry((*t as i64).div_euclid(crate::stress::WINDOW_S) * crate::stress::WINDOW_S).or_default();
+            e.0 += v;
+            e.1 += 1;
+        }
+        acc.into_iter().map(|(k, (s, n))| (k, s / n as f64)).collect()
+    };
+    let agreement = |w: &[(i64, f64)]| -> f64 {
+        let mut by_day: BTreeMap<String, f64> = BTreeMap::new();
+        for (t, v) in w {
+            if *v >= crate::stress::STRESSED_AT {
+                let (y, m, d) = crate::civil(t.div_euclid(86_400));
+                *by_day.entry(format!("{y:04}-{m:02}-{d:02}")).or_default() += 15.0;
+            }
+        }
+        let (x, y): (Vec<f64>, Vec<f64>) = daily
+            .iter()
+            .map(|(day, (s, _))| (by_day.get(day).copied().unwrap_or(0.0), *s))
+            .unzip();
+        if x.len() < 3 { 0.0 } else { correlation(&x, &y) }
+    };
+    let (plain, swapped) = (windows(false), windows(true));
+    if agreement(&swapped) > agreement(&plain) { swapped } else { plain }
+}
+
+/// The trailing mean of `f` over the days `from..=to` before `day`, with at least 5.
+fn trailing(series: &BTreeMap<i64, f64>, day: i64, from: i64, to: i64) -> Option<f64> {
+    let v: Vec<f64> = series.range(day - from..=day - to).map(|(_, x)| *x).collect();
+    (v.len() >= 5).then(|| mean(&v))
+}
+
+/// `params.stress`: the window-value distribution, unbiased cut-offs, the resilience
+/// contributor lines and level cut-offs. `None` without stress data in the export.
+fn fit_stress(rows: &[Row], daytime: &[Row]) -> Option<Value> {
+    let day_of = |r: &Row| r.get("date").and_then(Value::as_str).and_then(ymd_of);
+    let text = |r: &Row, k: &str| r.get(k).and_then(Value::as_str).is_some_and(|s| !s.is_empty());
+    // Days Oura judged, with their stressed and restored minutes.
+    let daily: BTreeMap<String, (f64, f64)> = rows
+        .iter()
+        .filter(|r| text(r, "stress_summary"))
+        .filter_map(|r| Some((day_of(r)?, (get(r, "stress_min")?, get(r, "restored_min")?))))
+        .collect();
+    if daily.is_empty() && daytime.is_empty() {
+        return None;
+    }
+    let mut out = Map::new();
+
+    // Window distribution and cut-offs whose totals match Oura's.
+    let windows = daytime_windows(daytime, &daily);
+    if windows.len() >= 500 {
+        let mut values: Vec<f64> = windows.iter().map(|(_, v)| *v).collect();
+        values.sort_by(|a, b| a.total_cmp(b));
+        let q: Vec<f64> = (0..=40).map(|i| (quantile(&values, i as f64 / 40.0) * 10.0).round() / 10.0).collect();
+        out.insert("quantiles".into(), json!(q));
+        let (lo, hi) = (windows[0].0, windows[windows.len() - 1].0);
+        let in_range = |day: &String| {
+            day_index_of(day).is_some_and(|d| d * 86_400 >= lo - 86_400 && d * 86_400 <= hi + 86_400)
+        };
+        let actual_s: f64 = daily.iter().filter(|(d, _)| in_range(d)).map(|(_, (s, _))| s).sum();
+        let actual_r: f64 = daily.iter().filter(|(d, _)| in_range(d)).map(|(_, (_, r))| r).sum();
+        let best = |actual: f64, sign: f64| -> f64 {
+            (20..=95)
+                .map(|t| t as f64)
+                .min_by(|a, b| {
+                    let total = |t: f64| windows.iter().filter(|(_, v)| sign * v >= t).count() as f64 * 15.0;
+                    (total(*a) - actual).abs().total_cmp(&(total(*b) - actual).abs())
+                })
+                .unwrap_or(if sign > 0.0 { crate::stress::STRESSED_AT } else { crate::stress::RESTORED_AT })
+        };
+        if actual_s > 0.0 {
+            out.insert("stressed_at".into(), json!(best(actual_s, 1.0)));
+        }
+        if actual_r > 0.0 {
+            out.insert("restored_at".into(), json!(best(actual_r, -1.0)));
+        }
+    }
+
+    // Resilience contributors: lines in the 14-day mean of √minutes.
+    let by_index = |pick: &dyn Fn(&(f64, f64)) -> f64| -> BTreeMap<i64, f64> {
+        daily.iter().filter_map(|(d, m)| Some((day_index_of(d)?, pick(m).max(0.0).sqrt()))).collect()
+    };
+    let sqrt_s = by_index(&|m| m.0);
+    let sqrt_r = by_index(&|m| m.1);
+    let resilience: Vec<(i64, &Row)> = rows
+        .iter()
+        .filter(|r| text(r, "resilience_level"))
+        .filter_map(|r| Some((day_index_of(&day_of(r)?)?, r)))
+        .collect();
+    let line = |series: &BTreeMap<i64, f64>, from: i64, to: i64, col: &str| -> Option<Value> {
+        let (x, y): (Vec<Vec<f64>>, Vec<f64>) = resilience
+            .iter()
+            .filter_map(|(d, r)| Some((vec![trailing(series, *d, from, to)?], get(r, col)?)))
+            .unzip();
+        if y.len() < 20 {
+            return None;
+        }
+        let c = least_squares(&x, &y)?; // [slope, intercept]
+        Some(json!([(c[1] * 100.0).round() / 100.0, (c[0] * 10_000.0).round() / 10_000.0]))
+    };
+    if let Some(v) = line(&sqrt_s, 14, 1, "Resilience Stress") {
+        out.insert("stress_fit".into(), v);
+    }
+    if let Some(v) = line(&sqrt_r, 13, 0, "Resilience Daytime Recovery") {
+        out.insert("recovery_fit".into(), v);
+    }
+
+    // Sleep recovery from 14-day means of nightly HRV, lowest heart rate and sleep score.
+    let nightly = |col: &str| -> BTreeMap<i64, f64> {
+        rows.iter().filter_map(|r| Some((day_index_of(&day_of(r)?)?, get(r, col)?))).collect()
+    };
+    let (hrv, rhr, score) = (nightly("Average HRV"), nightly("Lowest Resting Heart Rate"), nightly("Sleep Score"));
+    let (x, y): (Vec<Vec<f64>>, Vec<f64>) = resilience
+        .iter()
+        .filter_map(|(d, r)| {
+            Some((
+                vec![trailing(&hrv, *d, 13, 0)?, trailing(&rhr, *d, 13, 0)?, trailing(&score, *d, 13, 0)?],
+                get(r, "Resilience Sleep Recovery")?,
+            ))
+        })
+        .unzip();
+    if y.len() >= 30 {
+        if let Some(c) = least_squares(&x, &y) {
+            let pred: Vec<f64> = x.iter().map(|f| c[3] + c[0] * f[0] + c[1] * f[1] + c[2] * f[2]).collect();
+            let r = correlation(&pred, &y);
+            if r * r >= 0.3 {
+                let round = |v: f64| (v * 10_000.0).round() / 10_000.0;
+                out.insert("sleep_recovery_fit".into(), json!([round(c[3]), round(c[0]), round(c[1]), round(c[2])]));
+                out.insert("sleep_recovery_r2".into(), json!((r * r * 1000.0).round() / 1000.0));
+            }
+        }
+    }
+
+    // Level cut-offs on sleep recovery, one per step between levels.
+    let pairs: Vec<(f64, usize)> = resilience
+        .iter()
+        .filter_map(|(_, r)| {
+            let level = r.get("resilience_level")?.as_str()?;
+            Some((get(r, "Resilience Sleep Recovery")?, crate::stress::LEVELS.iter().position(|l| *l == level)?))
+        })
+        .collect();
+    if pairs.len() >= 30 {
+        let mut candidates: Vec<f64> = pairs.iter().map(|(v, _)| *v).collect();
+        candidates.sort_by(|a, b| a.total_cmp(b));
+        candidates.dedup();
+        let cuts: Vec<f64> = (1..=4)
+            .map(|k| {
+                let has_both = pairs.iter().any(|(_, l)| *l >= k) && pairs.iter().any(|(_, l)| *l < k);
+                if !has_both {
+                    return crate::stress::DEFAULT_LEVEL_CUTS[k - 1];
+                }
+                candidates
+                    .iter()
+                    .copied()
+                    .max_by_key(|c| pairs.iter().filter(|(v, l)| (*v >= *c) == (*l >= k)).count())
+                    .unwrap_or(crate::stress::DEFAULT_LEVEL_CUTS[k - 1])
+            })
+            .collect();
+        // Keep them in order even if a sparse level made one cross another.
+        let mut sorted = cuts.clone();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        out.insert("level_cuts".into(), json!(sorted));
+    }
+    Some(Value::Object(out))
+}
+
+fn day_index_of(day: &str) -> Option<i64> {
+    let y: i64 = day.get(0..4)?.parse().ok()?;
+    let m: u32 = day.get(5..7)?.parse().ok()?;
+    let d: u32 = day.get(8..10)?.parse().ok()?;
+    Some(crate::days_from_civil(y, m, d))
 }
 
 #[cfg(test)]
@@ -1187,6 +1423,23 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
         let dir = std::env::temp_dir().join(format!("oura-export-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("oura.db")
+    }
+
+    #[test]
+    fn stress_files_join_the_history() {
+        let db = temp_db("stress");
+        let daily = "id;day;day_summary;recovery_high;stress_high\n\
+a;2026-01-01;stressful;900;12600\nb;2026-01-02;;0;0\n";
+        let resilience = "id;contributors;day;level\n\
+c;\"{\"\"daytime_recovery\"\": 33.5, \"\"sleep_recovery\"\": 57.8, \"\"stress\"\": 57.2}\";2026-01-01;solid\n";
+        let r = import_files(&db, &[("dailystress.csv".into(), daily.into()), ("dailyresilience.csv".into(), resilience.into())]).unwrap();
+        assert_eq!(r["stress_calibrated"], true);
+        let h = &load(&db).unwrap()["history"];
+        assert_eq!(h["2026-01-01"]["stress_min"], 210.0);
+        assert_eq!(h["2026-01-01"]["restored_min"], 15.0);
+        assert_eq!(h["2026-01-01"]["stress_summary"], "stressful");
+        assert_eq!(h["2026-01-01"]["resilience_level"], "solid");
+        assert!(h["2026-01-02"].get("stress_summary").is_none());
     }
 
     #[test]

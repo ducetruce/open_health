@@ -136,13 +136,27 @@ struct TodayTab: View, Equatable, TabHelpers {
     let actions: AppActions
     @ObservedObject private var store = WorkoutStore.shared
     @State private var readinessExpanded = CommandLine.arguments.contains("-expandReadiness")
+    @State private var stressSheet: StressSheet?
+
+    enum StressSheet: String, Identifiable {
+        case stress, resilience
+        var id: String { rawValue }
+    }
 
     nonisolated static func == (a: Self, b: Self) -> Bool { a.inputs == b.inputs }
 
     private var busyLabel: String? { inputs.busyLabel }
     private var isBusy: Bool { inputs.isBusy }
 
-    var body: some View { TabPage { todayTab(s) } }
+    var body: some View {
+        TabPage { todayTab(s) }
+            .sheet(item: $stressSheet) { sheet in
+                switch sheet {
+                case .stress: StressView(s: s)
+                case .resilience: ResilienceView(s: s)
+                }
+            }
+    }
 
     private func toggleContributors() {
         withAnimation(.easeOut(duration: 0.18)) { readinessExpanded.toggle() }
@@ -173,6 +187,15 @@ struct TodayTab: View, Equatable, TabHelpers {
                 reviewLink(s)
 
                 todaySignals(s, night: night)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("DAYTIME · WHILE YOU SIT STILL").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+                    Text("Stress").font(Obs.pixel(24)).foregroundStyle(Obs.ink)
+                }
+                .padding(.top, 16)
+                StressCard(block: s.stress,
+                           onOpen: { stressSheet = .stress },
+                           onResilience: { stressSheet = .resilience })
 
                 if let day = s.days.first {
                     HStack(spacing: 9) {

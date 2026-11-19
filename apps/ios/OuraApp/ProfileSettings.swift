@@ -118,7 +118,8 @@ struct ProfileSettingsView: View {
     /// Export files the importer uses; everything else in Oura's export (raw
     /// location, motion, heart rate…) is left unread, some of it is hundreds of MB.
     private static let wantedExportFiles = ["dailysleep", "dailyreadiness", "sleepmodel",
-                                            "dailyactivity", "dailyspo2", "trends"]
+                                            "dailyactivity", "dailyspo2", "dailystress",
+                                            "daytimestress", "dailyresilience", "trends"]
 
     /// The CSVs to read from what was picked: files directly, or the wanted ones
     /// inside a picked folder (the unzipped export).
@@ -316,7 +317,7 @@ struct ProfileSettingsView: View {
                 } header: {
                     Text("Oura history")
                 } footer: {
-                    Text("In the Files app, copy dailysleep, dailyreadiness, sleepmodel, dailyactivity and dailyspo2 from your unzipped Oura export into On My iPhone → Open Oura → Oura export, then tap Import from the Open Oura folder (an older trends CSV works too). This fits Readiness and Sleep to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
+                    Text("In the Files app, copy dailysleep, dailyreadiness, sleepmodel, dailyactivity, dailyspo2, dailystress, daytimestress and dailyresilience from your unzipped Oura export into On My iPhone → Open Oura → Oura export, then tap Import from the Open Oura folder (an older trends CSV works too). This fits Readiness, Sleep and Stress to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
                 }
                 .fileImporter(isPresented: $choosingExport,
                               // No `.folder` here: with it, iOS's picker only lets folders be chosen.

@@ -231,6 +231,10 @@ struct ImportedDay: Codable {
     var asleep_s: Double?; var rhr: Double?; var hrv_ms: Double?
     var temp_deviation: Double?; var breath_rate: Double?
     var steps: Double?; var active_kcal: Double?
+    /// Oura's daytime stress: stressed and restored minutes and the day's verdict,
+    /// and that day's resilience level.
+    var stress_min: Double?; var restored_min: Double?
+    var stress_summary: String?; var resilience_level: String?
 }
 
 /// What an Oura export import covered.
@@ -385,6 +389,8 @@ struct Summary: Codable {
     /// Daily values from an imported Oura export, keyed by date (can predate the ring).
     var imported_history: [String: ImportedDay] = [:]
     var oura_import: OuraImportInfo?
+    /// Daytime stress by day and resilience (see `Stress.swift`).
+    var stress: StressBlock?
     var error: String?
     // `workouts`/`modelErrors` are filled on-device (not in the FFI JSON), so keep them
     // out of decoding.
@@ -392,7 +398,7 @@ struct Summary: Codable {
         case analysis_digest, analysis_version
         case digest, device, nights, clock, vitals, activity_profile, activity_daily, profile, cardio, fitness, error
         case symptoms
-        case imported_history, oura_import
+        case imported_history, oura_import, stress
         case sleepDebt = "sleep_debt"
     }
     init() {}
@@ -418,6 +424,7 @@ struct Summary: Codable {
         symptoms = try? c.decodeIfPresent(IllnessResult.self, forKey: .symptoms)
         imported_history = (try? c.decodeIfPresent([String: ImportedDay].self, forKey: .imported_history)) ?? [:]
         oura_import = try? c.decodeIfPresent(OuraImportInfo.self, forKey: .oura_import)
+        stress = try? c.decodeIfPresent(StressBlock.self, forKey: .stress)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
     }
     /// Ring days plus days only known from an imported Oura export, newest first.

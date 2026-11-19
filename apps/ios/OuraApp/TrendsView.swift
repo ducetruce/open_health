@@ -30,7 +30,7 @@ enum TrendPeriod: String, CaseIterable, Identifiable {
 
 /// How a metric's daily values are gathered and judged.
 enum TrendMetric: String, CaseIterable, Identifiable {
-    case readiness, sleepScore, asleep, restingHR, hrv, temperature, oxygen, breathing, steps, activeKcal
+    case readiness, sleepScore, asleep, restingHR, hrv, temperature, oxygen, breathing, stress, steps, activeKcal
     var id: String { rawValue }
 
     var title: String {
@@ -43,6 +43,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .temperature: return "Skin temperature"
         case .oxygen: return "Blood oxygen"
         case .breathing: return "Breathing rate"
+        case .stress: return "Daytime stress"
         case .steps: return "Steps"
         case .activeKcal: return "Active calories"
         }
@@ -58,6 +59,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .temperature: return "thermometer.medium"
         case .oxygen: return "lungs.fill"
         case .breathing: return "wind"
+        case .stress: return "waveform.path"
         case .steps: return "figure.walk"
         case .activeKcal: return "flame.fill"
         }
@@ -68,14 +70,14 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .readiness: return Obs.readinessAccent
         case .sleepScore, .asleep: return Obs.sleepAccent
         case .restingHR, .hrv: return Obs.heartAccent
-        case .temperature, .oxygen, .breathing: return Obs.chart
+        case .temperature, .oxygen, .breathing, .stress: return Obs.chart
         case .steps, .activeKcal: return Obs.activityAccent
         }
     }
 
     var unit: String {
         switch self {
-        case .readiness, .sleepScore, .asleep, .steps: return ""
+        case .readiness, .sleepScore, .asleep, .steps, .stress: return ""
         case .restingHR: return "bpm"
         case .hrv: return "ms"
         case .temperature: return UnitSettings.shared.temperature.symbol
@@ -89,7 +91,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     /// (skin temperature is judged by its distance from your usual, not its level).
     var higherIsBetter: Bool? {
         switch self {
-        case .restingHR, .breathing: return false
+        case .restingHR, .breathing, .stress: return false
         case .temperature: return nil
         default: return true
         }
@@ -99,6 +101,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     func format(_ v: Double) -> String {
         switch self {
         case .asleep: return Fmt.duration(seconds: v)
+        case .stress: return Fmt.duration(minutes: v)   // stressed time that day
         case .temperature: return String(format: "%+.1f", v)   // change from baseline
         case .breathing: return String(format: "%.1f", v)
         case .steps, .activeKcal: return Fmt.count(v)
@@ -127,6 +130,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .restingHR: return d.rhr
         case .hrv: return d.hrv_ms
         case .breathing: return d.breath_rate
+        case .stress: return d.stress_summary == nil ? nil : d.stress_min
         case .steps: return d.steps
         case .activeKcal: return d.active_kcal
         // Oura's export records skin temperature as a deviation (°C), the same measure
@@ -153,6 +157,11 @@ enum TrendMetric: String, CaseIterable, Identifiable {
             }
         case .oxygen: return s.nightlySeries(\.spo2_mean)
         case .breathing: return s.nightlySeries(\.breath_rate)
+        // Stressed minutes on days with enough still time for a verdict.
+        case .stress: return s.cached("stressTrend") {
+            (s.stress?.days ?? [:]).compactMap { day, d in d.verdict == nil ? nil : DatedVital(date: day, value: d.stressed_min) }
+                .sorted { $0.date < $1.date }
+        }
         case .steps: return s.activity_daily.compactMap { day, st in st.steps.map { DatedVital(date: day, value: $0) } }
             .sorted { $0.date < $1.date }
         case .activeKcal: return s.activity_daily.compactMap { day, st in st.active_kcal.map { DatedVital(date: day, value: $0) } }

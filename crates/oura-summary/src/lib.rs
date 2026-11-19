@@ -18,6 +18,7 @@ pub mod readiness;
 pub mod research_export;
 pub mod ring_time;
 pub mod sleep_score;
+pub mod stress;
 pub mod symptoms;
 pub mod workouts;
 
@@ -3020,6 +3021,8 @@ pub fn build_summary(
     let step_params = oura_import.as_ref().map(|v| &v["params"]);
     // Each minute counts once, even when the ring re-sends an overlapping record.
     let mut seen_minutes: std::collections::HashSet<i64> = Default::default();
+    // Each minute's MET, for leaving moving windows out of daytime stress.
+    let mut minute_met: std::collections::HashMap<i64, f64> = Default::default();
     for (ds, tag, jstr, cu) in &events {
         if name_of(*tag) != "activity_information" || !jstr.contains("\"met\"") {
             continue;
@@ -3035,6 +3038,7 @@ pub fn build_summary(
                     if !seen_minutes.insert((unix / 60.0).floor() as i64) {
                         continue;
                     }
+                    minute_met.insert((unix / 60.0).floor() as i64, mv);
                     let local = unix + tz * 3600.0;
                     let day_idx = (local / 86400.0).floor() as i64;
                     let (y, mo, dd) = civil(day_idx);
@@ -3123,6 +3127,47 @@ pub fn build_summary(
         })
         .collect::<serde_json::Map<_, _>>()
         .into();
+
+    // Daytime stress and resilience (see `stress`): quality-gated beats outside the
+    // nights, on Oura's scale, calibrated by an imported export when there is one.
+    let stress_block = {
+        let mut bursts = Vec::new();
+        for (ds, tag, jstr, cu) in &events {
+            if name_of(*tag) != "green_ibi_quality_event" || !is_dated(*ds, *cu) {
+                continue;
+            }
+            if let Ok(v) = serde_json::from_str::<Value>(jstr) {
+                if let Some(b) = stress::Burst::from_event(unix_s_at(*ds, *cu), &v) {
+                    bursts.push(b);
+                }
+            }
+        }
+        let stress_nights: Vec<stress::Night> = nights_json
+            .iter()
+            .filter_map(|n| {
+                Some(stress::Night {
+                    start_unix: n["start_unix"].as_f64()?,
+                    end_unix: n["end_unix"].as_f64()?,
+                    wake_day: n["wake_ymd"].as_str()?.to_string(),
+                    hours: n["in_bed_h"].as_f64().unwrap_or(0.0),
+                    hrv_ms: n["hrv_ms"].as_f64(),
+                    rhr: n["rhr"].as_f64(),
+                    sleep_score: n["oura_sleep_score"]["score"]
+                        .as_f64()
+                        .or_else(|| n["sleep_score"]["score"].as_f64()),
+                })
+            })
+            .collect();
+        let params = stress::Params::from(oura_import.as_ref().map(|v| &v["params"]));
+        stress::build(
+            &bursts,
+            &stress_nights,
+            &minute_met,
+            offset_seconds(tz),
+            &params,
+            oura_import.as_ref().map(|v| &v["history"]),
+        )
+    };
 
     // Finish the calibrated readiness scores now that daily activity is known:
     // average MET per day = rest (1) + the mean MET above rest of its measured buckets.
@@ -3416,6 +3461,7 @@ pub fn build_summary(
         // eats, judged against the wearer's own baseline. Same JSON shape as
         // IllnessResult so one card renders either source.
         "symptoms": symptoms,
+        "stress": stress_block,
         "illness": illness,
         "cardio": cva,
         "fitness": { "vo2max": (vo2max * 10.0).round() / 10.0 },

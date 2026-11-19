@@ -89,6 +89,7 @@ targets:
       - path: SignalUI.swift
       - path: SkinTemperature.swift
       - path: TabScreens.swift
+      - path: Stress.swift
       - path: BackgroundSync.swift
       - path: BLETransport.swift
       - path: RingSync.swift
