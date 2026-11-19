@@ -848,7 +848,8 @@ struct ActivityTab<Header: View>: View {
     /// What decides a redraw; see `TabInputs`.
     let inputs: TabInputs
     let onEndWorkout: () -> Void
-    @ViewBuilder var header: () -> Header
+    /// The screen title; given the date being shown ("Thu, Nov 19") for its top line.
+    @ViewBuilder var header: (String?) -> Header
     @ObservedObject private var store = WorkoutStore.shared
     @State private var day: String = ""
     @State private var showStart = false
@@ -869,7 +870,11 @@ struct ActivityTab<Header: View>: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                header()
+                header(day.isEmpty ? nil : DayHeading.label(day))
+                if !day.isEmpty, let latest = days.first, day != latest {
+                    LatestLink(title: "Today") { withAnimation(.easeOut(duration: 0.2)) { day = latest } }
+                        .padding(.horizontal, 20)
+                }
                 VStack(alignment: .leading, spacing: 18) {
                     rings
                     if let active = store.active {
@@ -895,6 +900,8 @@ struct ActivityTab<Header: View>: View {
         .scrollIndicators(.hidden)
         .background(Obs.canvas)
         .onAppear { if day.isEmpty { day = days.first ?? today } }
+        // A new day (after midnight or a sync) replaces whatever day was picked.
+        .onChange(of: days.first) { _, newest in if let newest { day = newest } }
         .sheet(isPresented: $showStart) { StartWorkoutSheet() }
         .sheet(isPresented: $showLog) { LogWorkoutSheet(day: day) }
         .sheet(isPresented: $showGoals) { GoalsSheet { goalsVersion += 1 } }

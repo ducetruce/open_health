@@ -60,6 +60,32 @@ struct ErrorCard: View {
     }
 }
 
+/// The date a screen is showing, for the line over its title: "Thu, Nov 19".
+enum DayHeading {
+    private static let format: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEEMMMd"); return f
+    }()
+    static func label(_ day: String) -> String {
+        WorkoutFormat.day.date(from: day).map { format.string(from: $0) } ?? day
+    }
+}
+
+/// "LATEST NIGHT ›": shown when an older day is picked, jumps back to the newest.
+struct LatestLink: View {
+    let title: String
+    let action: () -> Void
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: action) {
+                Text("\(title.uppercased()) ›").font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.signal)
+                    .padding(.vertical, 6).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 /// A scrolling tab page over the app backdrop.
 struct TabPage<Content: View>: View {
     @ViewBuilder var content: Content
@@ -411,11 +437,24 @@ struct SleepTab: View, Equatable, TabHelpers {
 
     private var busyLabel: String? { inputs.busyLabel }
 
-    var body: some View { TabPage { sleepTab(s) } }
+    var body: some View {
+        TabPage { sleepTab(s) }
+            // A newly synced night replaces whatever night was picked.
+            .onChange(of: s.days.first(where: { s.night(forDay: $0) != nil })) { _, _ in sleepDay = "" }
+    }
 
     @ViewBuilder private func sleepTab(_ s: Summary) -> some View {
-        AppHeader(title: "Sleep", subtitle: busyLabel) { HeaderButtons(actions: actions) }
         let nightDays = s.days.filter { s.night(forDay: $0) != nil }
+        let shownDay = nightDays.contains(sleepDay) ? sleepDay : nightDays.first
+        // The night on screen is named over the title, so a night picked in the strip
+        // below never reads as last night.
+        AppHeader(title: "Sleep", subtitle: busyLabel ?? shownDay.map { DayHeading.label($0) }) {
+            HeaderButtons(actions: actions)
+        }
+        if let shownDay, let latest = nightDays.first, shownDay != latest {
+            LatestLink(title: "Latest night") { withAnimation(.easeOut(duration: 0.2)) { sleepDay = latest } }
+                .padding(.horizontal, 20)
+        }
         if let err = s.error {
             ErrorCard(err: err, onConnect: actions.sync)
         } else if nightDays.isEmpty {

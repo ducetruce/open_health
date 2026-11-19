@@ -1171,8 +1171,8 @@ struct RootView: View {
                 .tabItem { Label("Today", systemImage: "house.fill") }.tag(AppTab.today).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
             SleepTab(s: s, inputs: inputs, actions: actions).equatable()
                 .tabItem { Label("Sleep", systemImage: "moon.fill") }.tag(AppTab.sleep).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
-            ActivityTab(s: s, inputs: inputs, onEndWorkout: finishWorkout) {
-                AppHeader(title: "Activity", subtitle: inputs.busyLabel) { HeaderButtons(actions: actions) }
+            ActivityTab(s: s, inputs: inputs, onEndWorkout: finishWorkout) { date in
+                AppHeader(title: "Activity", subtitle: inputs.busyLabel ?? date) { HeaderButtons(actions: actions) }
             }
             .equatable()
             .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
