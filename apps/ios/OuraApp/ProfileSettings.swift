@@ -94,6 +94,8 @@ private enum HealthProfileImporter {
 }
 
 struct ProfileSettingsView: View {
+    /// Shown on the Sleep screen next to the Oura-scale score only when this is on.
+    @AppStorage("sleep.showNormsScore") private var showNormsScore = false
     @Environment(\.dismiss) private var dismiss
     @State private var profile: EditableProfile
     @State private var importing = false
@@ -278,6 +280,7 @@ struct ProfileSettingsView: View {
 
                 Section {
                     if let info = ouraImport {
+                        Toggle("Also show the sleep-norms score", isOn: $showNormsScore)
                         LabeledContent("Days imported", value: "\(info.days ?? 0)")
                         LabeledContent("Covers", value: "\(Fmt.day(info.first)) – \(Fmt.day(info.last))")
                         LabeledContent("Scores calibrated", value: calibrationText(info))

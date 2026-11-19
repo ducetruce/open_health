@@ -1607,6 +1607,8 @@ struct DayReportView: View {
 struct SleepReport: View {
     let s: Summary
     let day: String
+    /// Profile → Oura history: also show the sleep-norms score next to the Oura-scale one.
+    @AppStorage("sleep.showNormsScore") private var showNormsScore = false
     @Environment(\.dayAnalysis) private var analysis
     @State private var editingBedtime = false
     @State private var bedtimeDate = Date()
@@ -1663,7 +1665,9 @@ struct SleepReport: View {
                 Rule("sleep score · Oura scale")
                 SleepScoreCard(score: score, breathRate: n.breath_rate)
             }
-            if let score = n.sleep_score {
+            // With an Oura calibration the Oura-scale score is the one shown; the
+            // sleep-norms score stays the fallback, or appears too when asked for.
+            if let score = n.sleep_score, n.oura_sleep_score == nil || showNormsScore {
                 Rule(n.oura_sleep_score == nil ? "sleep score" : "sleep score · sleep norms")
                 SleepScoreCard(score: score, breathRate: n.oura_sleep_score == nil ? n.breath_rate : nil)
             }
