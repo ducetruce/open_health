@@ -701,14 +701,15 @@ struct Readout: View {
     let value: String
     let caption: String
     var accent: Color = Obs.ink
+    var centered = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: centered ? .center : .leading, spacing: 3) {
             Text(value).font(Obs.mono(20, .medium)).foregroundStyle(accent).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.6)
             Text(caption.uppercased()).font(Obs.mono(9)).tracking(1.2).foregroundStyle(Obs.ink2)
                 .lineLimit(1).minimumScaleFactor(0.7)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
     }
 }
 
@@ -1661,9 +1662,9 @@ struct SleepReport: View {
 
             // summary strip
             HStack(alignment: .top, spacing: 0) {
-                Readout(value: Fmt.duration(seconds: n.durationS), caption: "in bed")
-                Readout(value: Fmt.duration(minutes: metrics?.asleepMin), caption: "asleep")
-                Readout(value: n.efficiency.map { "\(Int($0))%" } ?? "–", caption: "efficiency")
+                Readout(value: Fmt.duration(seconds: n.durationS), caption: "in bed", centered: true)
+                Readout(value: Fmt.duration(minutes: metrics?.asleepMin), caption: "asleep", centered: true)
+                Readout(value: n.efficiency.map { "\(Int($0))%" } ?? "–", caption: "efficiency", centered: true)
             }
             // Correcting a night's bedtime stays possible from a small link.
             Button {
