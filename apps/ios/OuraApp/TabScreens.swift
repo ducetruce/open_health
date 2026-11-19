@@ -397,8 +397,6 @@ struct TodayTab: View, Equatable, TabHelpers {
         guard let b = s.vitals.hrv.baseline, b > 0 else { return 0.75 }
         return min(1, max(0.05, 0.75 * v / b))
     }
-
-    // MARK: Sleep
 }
 
 // MARK: - Sleep
@@ -468,6 +466,7 @@ struct SleepTab: View, Equatable, TabHelpers {
             Spacer()
             Text(value ?? "–").font(Obs.mono(15, .semibold)).foregroundStyle(Obs.ink)
         }
+    }
 }
 
 // MARK: - Vitals
@@ -630,6 +629,4 @@ struct VitalsTab: View, Equatable, TabHelpers {
         }
         .obsCard()
     }
-
-    // MARK: workouts
 }
