@@ -1683,10 +1683,24 @@ struct SleepReport: View {
 
                 Rule("Sleep stages")
                 StageBar(n: n)
-                HStack(spacing: 16) {
-                    ForEach([("Deep", n.deep_pct), ("Light", n.light_pct), ("REM", n.rem_pct), ("Awake", n.wake_pct)], id: \.0) { name, pct in
-                        Text(name).font(Obs.mono(11)).foregroundStyle(Obs.ink2)
-                            + Text(" \(Int(pct ?? 0))%").font(Obs.mono(11, .medium)).foregroundStyle(Obs.ink)
+                // Time in each stage (its share of the time in bed), exact to the minute.
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    ForEach([(1, "Deep", n.deep_pct), (2, "Light", n.light_pct), (3, "REM", n.rem_pct), (4, "Awake", n.wake_pct)], id: \.0) { code, name, pct in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Rectangle().fill(Obs.stage(code)).frame(width: 10, height: 10)
+                                Text(name).font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                            }
+                            Text(pct.map { Fmt.duration(seconds: n.durationS * $0 / 100) } ?? "–")
+                                .font(Obs.pixel(24)).foregroundStyle(Obs.ink)
+                            Text(pct.map { "\(Int($0.rounded()))% of the night" } ?? " ")
+                                .font(Obs.mono(10)).foregroundStyle(Obs.muted)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Obs.card, in: RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.rule, lineWidth: 1))
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 if let m = metrics { clinicalGrid(m) }
