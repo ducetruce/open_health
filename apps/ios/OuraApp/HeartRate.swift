@@ -206,7 +206,7 @@ struct HourlyHeartRateSection: View {
     }
 
     private static let stampFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "MMM d HH:mm"; return f
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMdjmm"); return f
     }()
     static func stamp(_ unix: Double) -> String {
         stampFmt.string(from: Date(timeIntervalSince1970: unix))

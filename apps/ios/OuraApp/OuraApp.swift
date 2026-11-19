@@ -29,7 +29,7 @@ struct TodayCard: View {
                                 .font(Obs.mono(11)).foregroundStyle(Obs.ink2)
                             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                         }
-                        Text("\(n.start ?? "–") → \(n.end ?? "–")")
+                        Text("\(Fmt.clock(n.start)) → \(Fmt.clock(n.end))")
                             .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
                         if n.hasHypnogram { Hypnogram(stages: n.hypnogram!, height: 28) }
                         else if let e = n.efficiency {
@@ -200,7 +200,7 @@ struct AllDaysView: View {
                 if let n = night, n.hasHypnogram {
                     Hypnogram(stages: n.hypnogram!, height: 12)
                 } else if let n = night, let start = n.start, let end = n.end {
-                    Text("\(start) → \(end)").font(Obs.mono(10)).foregroundStyle(Obs.muted)
+                    Text("\(Fmt.clock(start)) → \(Fmt.clock(end))").font(Obs.mono(10)).foregroundStyle(Obs.muted)
                 }
             }
             Spacer(minLength: 4)
@@ -912,7 +912,7 @@ struct RootView: View {
     }
     private func latestLabel(date: String?, time: String? = nil) -> String {
         let day = date.map { Fmt.day($0) }
-        let stamp = [day, time].compactMap { $0 }.joined(separator: " · ")
+        let stamp = [day, time.map { Fmt.clock($0) }].compactMap { $0 }.joined(separator: " · ")
         return stamp.isEmpty ? "Latest sync" : "Latest · \(stamp)"
     }
     var body: some View {
@@ -1665,7 +1665,7 @@ struct RootView: View {
                     } ?? "–",
                     accent: (s.device?.battery_pct ?? 100) < 20 ? Obs.bad : Obs.ink)
             ObsStat(label: "Last synced",
-                    value: s.device.flatMap { d in d.synced.map { "\($0) \(d.synced_hm ?? "")" } } ?? "–")
+                    value: s.device.flatMap { d in d.synced.map { "\(Fmt.day($0)) \(d.synced_hm.map { Fmt.clock($0) } ?? "")" } } ?? "–")
             ObsStat(label: "Serial", value: s.device?.serial ?? "–")
             ObsStat(label: "Firmware", value: s.device?.firmware ?? "–")
             if let raw = s.device?.raw_events ?? s.device?.total_events {
@@ -1710,7 +1710,7 @@ struct BuildStamp: View {
 
     private static let stampFormat: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "MMM d HH:mm"
+        f.setLocalizedDateFormatFromTemplate("MMMdjmm")
         return f
     }()
 

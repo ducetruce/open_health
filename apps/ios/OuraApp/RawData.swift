@@ -330,7 +330,7 @@ struct RawDataView: View {
     }
 
     private static let stampFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "MMM d HH:mm"; return f
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMdjmm"); return f
     }()
     private static func stamp(_ t: Double) -> String {
         stampFmt.string(from: Date(timeIntervalSince1970: t))
@@ -344,7 +344,7 @@ struct TimeSeriesChart: View {
     var accent: Color = Obs.chart
 
     private static let clock: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "MMM d HH:mm:ss"; return f
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMdjmmss"); return f
     }()
 
     /// At most ~600 scrub stops, evenly spaced through the samples.

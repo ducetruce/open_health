@@ -871,7 +871,7 @@ struct Polysomnograph: View {
             Color.clear.frame(width: gutterW)
             GeometryReader { g in
                 ForEach(hourTicks(win), id: \.self) { t in
-                    Text(String(format: "%02d", (t % 1440) / 60))
+                    Text(Fmt.hour((t % 1440) / 60)).lineLimit(1).fixedSize()
                         .font(Obs.mono(9)).foregroundStyle(Obs.ink2)
                         .position(x: CGFloat(Double(t - win.a) / Double(win.span)) * g.size.width, y: 8)
                 }
@@ -1020,7 +1020,7 @@ private func nightWindow(_ n: NightRow) -> (a: Int, b: Int, span: Int) {
 }
 private func clockAt(_ win: (a: Int, b: Int, span: Int), _ f: Double) -> String {
     let t = (win.a + Int((Double(win.span) * f).rounded())) % 1440
-    return String(format: "%02d:%02d", t / 60, t % 60)
+    return Fmt.clock(hour: t / 60, minute: t % 60)
 }
 private func hourTicks(_ win: (a: Int, b: Int, span: Int)) -> [Int] {
     var t = ((win.a + 59) / 60) * 60; var out: [Int] = []
@@ -1652,7 +1652,7 @@ struct SleepReport: View {
                     wakeupDate = Self.dateFromHM(n.end)
                     editingBedtime.toggle()
                 } label: {
-                    Readout(value: "\(n.start ?? "–")–\(n.end ?? "–")",
+                    Readout(value: Fmt.clockRange(n.start, n.end),
                             caption: n.isBedtimeManual ? "bedtime · edited" : "bedtime ›",
                             accent: editingBedtime ? Obs.chart : Obs.ink)
                 }
@@ -1983,7 +1983,7 @@ private func compactSteps(_ steps: Double?) -> (value: String, unit: String) {
 private struct StepsByHour: View {
     let hourly: [Double]   // 24 values, 00:00–23:00
 
-    private func label(_ h: Int) -> String { String(format: "%02d:00", h) }
+    private func label(_ h: Int) -> String { Fmt.hour(h) }
 
     var body: some View {
         let peak = hourly.indices.max { hourly[$0] < hourly[$1] } ?? 0
@@ -2063,7 +2063,7 @@ private struct MetProfile: View {
             .scrubbable(timeline.points.map { p in
                 let span = max(1, timeline.endHour - timeline.startHour)
                 let h = p.hour.truncatingRemainder(dividingBy: 24)
-                let clock = String(format: "%02d:%02d", Int(h), Int((h - floor(h)) * 60))
+                let clock = Fmt.clock(hour: Int(h), minute: Int((h - floor(h)) * 60))
                 return ScrubPoint(x: (p.hour - timeline.startHour) / span,
                                   label: "\(clock) · \(String(format: "%.1f", p.met)) MET")
             })
@@ -2071,10 +2071,10 @@ private struct MetProfile: View {
                 let span = max(1, timeline.endHour - timeline.startHour)
                 ForEach(ticks, id: \.self) { hour in
                     let rawX = g.size.width * CGFloat((hour - timeline.startHour) / span)
-                    Text(String(format: "%02d", Int(hour) % 24))
+                    Text(Fmt.hour(Int(hour) % 24)).lineLimit(1)
                         .font(Obs.mono(9)).foregroundStyle(Obs.ink2)
-                        .frame(width: 24)
-                        .position(x: min(max(12, rawX), g.size.width - 12), y: 6)
+                        .frame(width: 40)
+                        .position(x: min(max(20, rawX), g.size.width - 20), y: 6)
                 }
             }.frame(height: 12)
         }

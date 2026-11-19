@@ -683,7 +683,7 @@ private func nextDay(after day: String) -> String? {
 
 private func clockLabel(_ hour: Double) -> String {
     let totalMinutes = Int((hour * 60).rounded())
-    return String(format: "%02d:%02d", (totalMinutes / 60) % 24, totalMinutes % 60)
+    return Fmt.clock(hour: (totalMinutes / 60) % 24, minute: totalMinutes % 60)
 }
 
 /// Persists manual bedtime and wake-up adjustments in `bedtime_overrides.json` beside

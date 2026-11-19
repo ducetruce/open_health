@@ -56,7 +56,7 @@ struct SessionRow: View {
             Text(actLabel(label)).font(Obs.mono(13, .medium)).foregroundStyle(Obs.ink)
             Spacer()
             Text("\(durationMin) min").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
-            Text(startHM).font(Obs.mono(11)).foregroundStyle(Obs.muted)
+            Text(Fmt.clock(startHM)).font(Obs.mono(11)).foregroundStyle(Obs.muted)
         }
     }
 }

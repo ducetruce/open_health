@@ -186,7 +186,7 @@ struct WorkoutRow: View {
                             .background(Obs.cardHigh, in: Capsule())
                     }
                 }
-                Text("\(session.startHM)–\(session.end)")
+                Text(Fmt.clockRange(session.startHM, session.end))
                     .font(Obs.mono(13)).foregroundStyle(Obs.muted)
             }
             Spacer()
@@ -215,7 +215,7 @@ struct DetectedWorkoutRow: View {
     private var guess: WorkoutKind { WorkoutKind.guess(from: session.label) }
 
     private var when: String {
-        let time = "\(session.startHM)–\(session.end)"
+        let time = Fmt.clockRange(session.startHM, session.end)
         guard showDay else { return time }
         return "\(Fmt.day(session.dayLabel)) · \(time)"
     }
@@ -568,7 +568,7 @@ struct WorkoutDetailView: View {
                             .background(Obs.activityAccent.opacity(0.15), in: Circle())
                         VStack(alignment: .leading, spacing: 4) {
                             Text(title).font(.system(size: 24, weight: .bold)).foregroundStyle(Obs.ink)
-                            Text("\(session.dayLabel) · \(session.startHM)–\(session.end)")
+                            Text("\(Fmt.day(session.dayLabel)) · \(Fmt.clockRange(session.startHM, session.end))")
                                 .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
                         }
                     }

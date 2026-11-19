@@ -242,6 +242,44 @@ enum Fmt {
         return first.uppercased() + text.dropFirst()
     }
 
+    /// Clock times follow the iPhone's 12/24-hour setting ("5:42 PM" or "17:42").
+    private static let clockFormat: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("jmm"); return f
+    }()
+    private static let hourFormat: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("j"); return f
+    }()
+    private static let stampFormat: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMdjmm"); return f
+    }()
+
+    private static func clockDate(_ hour: Int, _ minute: Int) -> Date {
+        var c = DateComponents(); c.year = 2001; c.month = 1; c.day = 1
+        c.hour = ((hour % 24) + 24) % 24; c.minute = minute
+        return Calendar.current.date(from: c) ?? Date()
+    }
+
+    /// A clock time: "5:42 PM".
+    static func clock(hour: Int, minute: Int) -> String { clockFormat.string(from: clockDate(hour, minute)) }
+
+    /// An hour on a chart axis: "5 PM".
+    static func hour(_ hour: Int) -> String { hourFormat.string(from: clockDate(hour, 0)) }
+
+    /// A clock time from an "HH:MM" string (the summary JSON's format); the string
+    /// itself if it isn't one.
+    static func clock(_ hm: String?) -> String {
+        guard let hm else { return "–" }
+        let parts = hm.split(separator: ":").compactMap { Int($0) }
+        guard parts.count >= 2 else { return hm }
+        return clock(hour: parts[0], minute: parts[1])
+    }
+
+    /// "5:42 PM–6:10 PM" from two "HH:MM" strings.
+    static func clockRange(_ start: String?, _ end: String?) -> String { "\(clock(start))–\(clock(end))" }
+
+    /// "Nov 9, 5:42 PM".
+    static func stamp(_ date: Date) -> String { stampFormat.string(from: date) }
+
     /// "Nov 9" for a "2026-11-09" day key (the original string if it isn't one).
     static func day(_ ymd: String?) -> String {
         guard let ymd else { return "–" }
