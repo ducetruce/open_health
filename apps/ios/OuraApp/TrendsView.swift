@@ -289,7 +289,7 @@ struct TrendsTab<Header: View>: View {
                     let shown = summaries.filter { $0.count > 0 }
                     if shown.isEmpty {
                         Text("No data in this period yet. Sync your ring, or choose a longer period.")
-                            .font(.system(size: 15)).foregroundStyle(Obs.ink2)
+                            .font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                             .obsCard()
                     } else {
                         TrendHighlights(summaries: shown, period: period)
@@ -331,7 +331,7 @@ private struct TrendHighlights: View {
                 ObsTag("compared with the \(period.previousLabel)", icon: "arrow.up.arrow.down")
                 if declining.isEmpty && improving.isEmpty {
                     Text("Everything is holding steady.")
-                        .font(.system(size: 15)).foregroundStyle(Obs.ink)
+                        .font(Obs.mono(15)).foregroundStyle(Obs.ink)
                 }
                 if !declining.isEmpty {
                     highlightRow(title: "Needs attention", items: declining, color: Obs.bad,
@@ -349,10 +349,10 @@ private struct TrendHighlights: View {
     private func highlightRow(title: String, items: [TrendSummary], color: Color, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: icon)
-                .font(.system(size: 14, weight: .semibold)).foregroundStyle(color)
+                .font(Obs.mono(14)).foregroundStyle(color)
             ForEach(items.prefix(4), id: \.metric) { item in
                 HStack {
-                    Text(item.metric.title).font(.system(size: 14)).foregroundStyle(Obs.ink)
+                    Text(item.metric.title).font(Obs.mono(14)).foregroundStyle(Obs.ink)
                     Spacer()
                     Text(changeText(item)).font(Obs.mono(13, .medium)).foregroundStyle(color)
                 }
@@ -398,12 +398,12 @@ struct TrendCard: View {
                 if !metric.unit.isEmpty {
                     Text(metric.unit).font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                 }
-                Text("average").font(.system(size: 12)).foregroundStyle(Obs.muted)
+                Text("average").font(Obs.mono(12)).foregroundStyle(Obs.muted)
                 Spacer()
             }
             if let direction = directionText {
                 Text("\(direction.0) vs \(period.previousLabel)")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(direction.1)
+                    .font(Obs.mono(12)).foregroundStyle(direction.1)
             }
             TrendChart(summary: summary, height: compact ? 110 : 220)
         }
@@ -522,7 +522,7 @@ struct TrendDetailView: View {
                     .pickerStyle(.segmented)
                     if summary.count == 0 {
                         Text("No data in this period yet.")
-                            .font(.system(size: 15)).foregroundStyle(Obs.ink2)
+                            .font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                     } else {
                         TrendCard(summary: summary, period: period, compact: false)
                         VStack(spacing: 10) {

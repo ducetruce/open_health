@@ -1231,7 +1231,7 @@ struct IllnessCard: View {
                         Text(showDetails ? "Hide details" : "View details")
                         Spacer()
                         Image(systemName: showDetails ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.semibold))
+                            .font(Obs.mono(12))
                     }
                     .font(Obs.mono(12, .medium))
                     .foregroundStyle(Obs.ink)
@@ -1245,7 +1245,7 @@ struct IllnessCard: View {
             if illness.available && showDetails {
                 Rectangle().fill(Obs.rule).frame(height: 1)
                 Text("Overnight measurements")
-                    .font(.subheadline.weight(.medium)).foregroundStyle(Obs.ink)
+                    .font(Obs.mono(15)).foregroundStyle(Obs.ink)
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(Self.order, id: \.self) { type in
                         if let biomarker = illness.biomarkers.first(where: { $0.type == type }) {
@@ -1256,11 +1256,11 @@ struct IllnessCard: View {
                 }
                 if illness.biomarkers.isEmpty {
                     Text("Measurement details aren’t available for this result.")
-                        .font(.subheadline).foregroundStyle(Obs.muted)
+                        .font(Obs.mono(15)).foregroundStyle(Obs.muted)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Based on \(illness.daysWithData) nights in the past 30 days")
-                        .font(.caption).foregroundStyle(Obs.muted)
+                        .font(Obs.mono(12)).foregroundStyle(Obs.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -1315,23 +1315,23 @@ private struct BiomarkerRow: View {
                 ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                 : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
             layout {
-                Text(name).font(.subheadline).foregroundStyle(Obs.ink2)
+                Text(name).font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                     .fixedSize(horizontal: false, vertical: true)
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 Text("\(formatted(biomarker.value)) \(unit)")
-                    .font(.subheadline.weight(.medium)).monospacedDigit()
+                    .font(Obs.mono(15)).monospacedDigit()
                     .foregroundStyle(biomarker.indicatesSymptoms ? Obs.alert : Obs.ink)
                     .fixedSize()
             }
             if biomarker.indicatesSymptoms {
-                Text(change).font(.caption).foregroundStyle(Obs.alert)
+                Text(change).font(Obs.mono(12)).foregroundStyle(Obs.alert)
             }
             if biomarker.lower.isFinite && biomarker.upper.isFinite && biomarker.lower <= biomarker.upper {
                 Text("Personal range: \(formatted(biomarker.lower)) to \(formatted(biomarker.upper)) \(unit)")
-                    .font(.caption).foregroundStyle(Obs.muted)
+                    .font(Obs.mono(12)).foregroundStyle(Obs.muted)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Personal range unavailable").font(.caption).foregroundStyle(Obs.muted)
+                Text("Personal range unavailable").font(Obs.mono(12)).foregroundStyle(Obs.muted)
             }
         }
         .accessibilityElement(children: .combine)
@@ -1490,7 +1490,7 @@ struct DayReportView: View {
                     VStack(alignment: .leading, spacing: 26) {
                         if let analysis, let note = refreshNote(analysis) {
                             Text(note)
-                                .font(.footnote).foregroundStyle(Obs.muted)
+                                .font(Obs.mono(13)).foregroundStyle(Obs.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityAddTraits(.updatesFrequently)
                         }
@@ -1614,6 +1614,15 @@ func stageSeconds(_ n: NightRow, code: Int, pct: Double?) -> Double? {
     return pct.map { n.durationS * $0 / 100 }
 }
 
+/// Seconds actually asleep (deep, light and REM) in a night: from the hypnogram when
+/// there is one, else time in bed × efficiency.
+func asleepSeconds(_ n: NightRow) -> Double? {
+    if let stages = n.hypnogram, !stages.isEmpty {
+        return n.durationS * Double(stages.filter { (1...3).contains($0) }.count) / Double(stages.count)
+    }
+    return n.efficiency.map { n.durationS * $0 / 100 }
+}
+
 struct SleepReport: View {
     let s: Summary
     let day: String
@@ -1647,18 +1656,19 @@ struct SleepReport: View {
                 Readout(value: Fmt.duration(seconds: n.durationS), caption: "in bed")
                 Readout(value: Fmt.duration(minutes: metrics?.asleepMin), caption: "asleep")
                 Readout(value: n.efficiency.map { "\(Int($0))%" } ?? "–", caption: "efficiency")
-                Button {
-                    bedtimeDate = Self.dateFromHM(n.start)
-                    wakeupDate = Self.dateFromHM(n.end)
-                    editingBedtime.toggle()
-                } label: {
-                    Readout(value: Fmt.clockRange(n.start, n.end),
-                            caption: n.isBedtimeManual ? "bedtime · edited" : "bedtime ›",
-                            accent: editingBedtime ? Obs.chart : Obs.ink)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Adjust bedtime and wake-up time")
             }
+            // Correcting a night's bedtime stays possible from a small link.
+            Button {
+                bedtimeDate = Self.dateFromHM(n.start)
+                wakeupDate = Self.dateFromHM(n.end)
+                editingBedtime.toggle()
+            } label: {
+                Text(editingBedtime ? "DONE ADJUSTING" : (n.isBedtimeManual ? "BEDTIME EDITED · ADJUST ›" : "ADJUST BEDTIME ›"))
+                    .font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                    .padding(.vertical, 6).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Adjust bedtime and wake-up time")
 
             if editingBedtime {
                 bedtimeEditor(n)
@@ -1668,7 +1678,7 @@ struct SleepReport: View {
                 Text(n.sleep_wake_source == "ring"
                      ? "Estimated stages. Asleep versus awake comes from your ring; deep, light and REM are estimated from heart rate, HRV and movement, because Oura's staging model isn't in this build."
                      : "Estimated stages, from heart rate, HRV and movement: Oura's staging model isn't in this build, and your ring didn't provide its own.")
-                    .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                    .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let score = n.oura_sleep_score {

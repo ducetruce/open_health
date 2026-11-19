@@ -264,7 +264,7 @@ struct ProfileSettingsView: View {
                         }
                     }
                     .disabled(importing)
-                    if let message { Text(message).font(.footnote).foregroundStyle(Obs.ink2) }
+                    if let message { Text(message).font(Obs.mono(13)).foregroundStyle(Obs.ink2) }
                 }
 
                 Section {
@@ -311,7 +311,7 @@ struct ProfileSettingsView: View {
                         }
                     }
                     if let importStatus {
-                        Text(importStatus).font(.footnote).foregroundStyle(Obs.ink2)
+                        Text(importStatus).font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     }
                 } header: {
                     Text("Oura history")
@@ -331,7 +331,7 @@ struct ProfileSettingsView: View {
                         set: { health.setEnabled($0, summary: SummaryCache.load()) }
                     ))
                     if !health.status.isEmpty {
-                        Text(health.status).font(.footnote).foregroundStyle(Obs.ink2)
+                        Text(health.status).font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     }
                     if health.enabled {
                         Button("Remove Open Oura samples from Health") {

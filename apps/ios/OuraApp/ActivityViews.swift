@@ -58,45 +58,57 @@ struct ScoreRing: View {
     }
 }
 
-/// Horizontal day picker, oldest on the left, scrolled to the selection.
+/// Horizontal day picker, oldest on the left, scrolled to the selection, styled like
+/// Today's 7-day strip: rounded pills with the weekday, the date and a value beneath.
 struct DayStrip: View {
     let days: [String]            // newest first (Summary.days order)
     @Binding var selection: String
+    /// Small caption over the strip ("Nights · sleep score").
+    var title: String? = nil
+    /// The value under each date (a score, a step count); nil shows a dash.
+    var detail: (String) -> String? = { _ in nil }
 
     private static let weekday: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE"; return f
     }()
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(Array(days.prefix(60).reversed()), id: \.self) { day in
-                        let on = day == selection
-                        let date = WorkoutFormat.day.date(from: day)
-                        Button { selection = day } label: {
-                            VStack(spacing: 4) {
-                                Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
-                                    .font(Obs.label(10)).tracking(1)
-                                    .foregroundStyle(on ? Obs.onSignal : Obs.muted)
-                                Text(String(day.suffix(2)))
-                                    .font(Obs.pixel(17))
-                                    .foregroundStyle(on ? Obs.onSignal : Obs.ink)
-                            }
-                            .frame(width: 46, height: 56)
-                            .background(on ? Obs.signal : Obs.card, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(on ? Obs.signal : Obs.rule, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                        .id(day)
-                        .accessibilityLabel(day)
-                        .accessibilityAddTraits(on ? .isSelected : [])
-                    }
-                }
-                .padding(.horizontal, 20)
+        VStack(alignment: .leading, spacing: 10) {
+            if let title {
+                Text(title.uppercased()).font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+                    .padding(.horizontal, 20)
             }
-            .onAppear { proxy.scrollTo(selection, anchor: .trailing) }
-            .onChange(of: selection) { _, d in withAnimation { proxy.scrollTo(d, anchor: .center) } }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(Array(days.prefix(60).reversed()), id: \.self) { day in
+                            let on = day == selection
+                            let date = WorkoutFormat.day.date(from: day)
+                            Button { selection = day } label: {
+                                VStack(spacing: 6) {
+                                    Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
+                                        .font(Obs.label(10))
+                                    Text(String(day.suffix(2))).font(Obs.pixel(18))
+                                    Text(detail(day) ?? "–").font(Obs.mono(11))
+                                        .lineLimit(1).minimumScaleFactor(0.6)
+                                }
+                                .foregroundStyle(on ? Obs.onSignal : Obs.ink2)
+                                .frame(width: 50).padding(.vertical, 10)
+                                .background(on ? Obs.signal : Color.clear, in: Capsule())
+                                .overlay(Capsule().strokeBorder(on ? Obs.signal : Obs.rule, lineWidth: 1))
+                                .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .id(day)
+                            .accessibilityLabel("\(Fmt.day(day))\(detail(day).map { ", \($0)" } ?? "")")
+                            .accessibilityAddTraits(on ? .isSelected : [])
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+                .onAppear { proxy.scrollTo(selection, anchor: .trailing) }
+                .onChange(of: selection) { _, d in withAnimation { proxy.scrollTo(d, anchor: .center) } }
+            }
         }
     }
 }
@@ -169,7 +181,7 @@ struct WorkoutRow: View {
         HStack(spacing: 14) {
             Image(systemName: session.isUser ? (WorkoutKind(rawValue: session.label)?.symbol ?? activitySymbol(session.label))
                                              : activitySymbol(session.label))
-                .font(.system(size: 18, weight: .medium))
+                .font(Obs.mono(18))
                 .foregroundStyle(Obs.activityAccent)
                 .frame(width: 44, height: 44)
                 .background(Obs.activityAccent.opacity(0.14), in: Circle())
@@ -177,7 +189,7 @@ struct WorkoutRow: View {
                 HStack(spacing: 6) {
                     Text(session.isUser ? (WorkoutKind(rawValue: session.label)?.title ?? actLabel(session.label))
                                         : actLabel(session.label))
-                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(Obs.ink)
+                        .font(Obs.mono(16)).foregroundStyle(Obs.ink)
                     if let badge {
                         Text(badge.uppercased())
                             .font(Obs.label(9)).tracking(0.8)
@@ -229,7 +241,7 @@ struct DetectedWorkoutRow: View {
                         .frame(width: 40, height: 40)
                         .overlay(Circle().strokeBorder(Obs.signalDim, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("\(guess.title)?").font(.system(size: 16, weight: .semibold)).foregroundStyle(Obs.ink)
+                        Text("\(guess.title)?").font(Obs.mono(16)).foregroundStyle(Obs.ink)
                         Text(when).font(Obs.mono(12)).foregroundStyle(Obs.muted)
                     }
                     Spacer()
@@ -248,7 +260,7 @@ struct DetectedWorkoutRow: View {
             HStack(spacing: 8) {
                 Button { onKeep(guess) } label: {
                     Label("Keep as \(guess.title)", systemImage: "checkmark")
-                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(Obs.onSignal)
+                        .font(Obs.mono(14)).foregroundStyle(Obs.onSignal)
                         .lineLimit(1).minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                         .background(Obs.signal, in: RoundedRectangle(cornerRadius: 4))
@@ -259,7 +271,7 @@ struct DetectedWorkoutRow: View {
                     }
                 } label: {
                     Text("Other type")
-                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Obs.signal)
+                        .font(Obs.mono(14)).foregroundStyle(Obs.signal)
                         .padding(.horizontal, 12).padding(.vertical, 10)
                         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.signalDim, lineWidth: 1))
                 }
@@ -305,7 +317,7 @@ struct LiveWorkoutCard: View {
                     .frame(width: 54, height: 54)
                     .background(Obs.activityAccent.opacity(0.15), in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(active.kind.title).font(.system(size: 17, weight: .semibold)).foregroundStyle(Obs.ink)
+                    Text(active.kind.title).font(Obs.mono(17)).foregroundStyle(Obs.ink)
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(WorkoutFormat.clock(context.date.timeIntervalSince(active.start)))
                             .font(Obs.rounded(34, .bold)).foregroundStyle(Obs.ink)
@@ -315,14 +327,14 @@ struct LiveWorkoutCard: View {
             }
             Button(action: onEnd) {
                 Text("End workout")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(Obs.mono(16))
                     .foregroundStyle(Obs.paper)
                     .frame(maxWidth: .infinity).padding(.vertical, 14)
                     .background(Obs.activityAccent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
             Text("Wear your ring. Heart rate and calories fill in after the ring syncs.")
-                .font(.system(size: 12)).foregroundStyle(Obs.muted)
+                .font(Obs.mono(12)).foregroundStyle(Obs.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .obsCard()
@@ -340,14 +352,14 @@ struct WorkoutActions: View {
         HStack(spacing: 10) {
             Button(action: onStart) {
                 Label("Start workout", systemImage: "play.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Obs.mono(15))
                     .foregroundStyle(Obs.paper)
                     .frame(maxWidth: .infinity).padding(.vertical, 14)
                     .background(Obs.activityAccent, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
             Button(action: onLog) {
                 Label("Log past", systemImage: "plus")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Obs.mono(15))
                     .foregroundStyle(Obs.signal)
                     .frame(maxWidth: .infinity).padding(.vertical, 14)
                     .background(Obs.card, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
@@ -370,7 +382,7 @@ struct StartWorkoutSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Choose an activity. The timer runs until you end it, even if you leave the app.")
-                        .font(.system(size: 14)).foregroundStyle(Obs.ink2)
+                        .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
                     LazyVGrid(columns: cols, spacing: 12) {
                         ForEach(WorkoutKind.allCases) { kind in
                             Button {
@@ -381,7 +393,7 @@ struct StartWorkoutSheet: View {
                                     Image(systemName: kind.symbol)
                                         .font(.system(size: 24, weight: .medium))
                                         .foregroundStyle(Obs.activityAccent)
-                                    Text(kind.title).font(.system(size: 13, weight: .medium))
+                                    Text(kind.title).font(Obs.mono(13))
                                         .foregroundStyle(Obs.ink).lineLimit(1).minimumScaleFactor(0.75)
                                 }
                                 .frame(maxWidth: .infinity).frame(height: 92)
@@ -445,7 +457,7 @@ struct LogWorkoutSheet: View {
                 }
                 Section {
                     Text("Calories, steps and heart rate come from what your ring recorded during this time.")
-                        .font(.footnote).foregroundStyle(Obs.muted)
+                        .font(Obs.mono(13)).foregroundStyle(Obs.muted)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -567,12 +579,12 @@ struct WorkoutDetailView: View {
                             .frame(width: 60, height: 60)
                             .background(Obs.activityAccent.opacity(0.15), in: Circle())
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(title).font(.system(size: 24, weight: .bold)).foregroundStyle(Obs.ink)
+                            Text(title).font(Obs.mono(24)).foregroundStyle(Obs.ink)
                             Text("\(Fmt.day(session.dayLabel)) · \(Fmt.clockRange(session.startHM, session.end))")
                                 .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
                         }
                     }
-                    Text(sourceText).font(.system(size: 13)).foregroundStyle(Obs.muted)
+                    Text(sourceText).font(Obs.mono(13)).foregroundStyle(Obs.muted)
 
                     statsGrid
 
@@ -587,7 +599,7 @@ struct WorkoutDetailView: View {
                     if let note = store.userWorkout(sessionID: session.id)?.note {
                         VStack(alignment: .leading, spacing: 6) {
                             ObsTag("note", icon: "text.alignleft")
-                            Text(note).font(.system(size: 15)).foregroundStyle(Obs.ink)
+                            Text(note).font(Obs.mono(15)).foregroundStyle(Obs.ink)
                         }.obsCard()
                     }
 
@@ -648,7 +660,7 @@ struct WorkoutDetailView: View {
 
     private func note(_ text: String) -> some View {
         Label { Text(text).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "info.circle") }
-            .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
     }
 
     @ViewBuilder private var actions: some View {
@@ -659,24 +671,24 @@ struct WorkoutDetailView: View {
                         Button { store.confirm(d, as: kind); dismiss() } label: { Label(kind.title, systemImage: kind.symbol) }
                     }
                 } label: {
-                    Text("Save as workout…").font(.system(size: 16, weight: .semibold)).foregroundStyle(Obs.paper)
+                    Text("Save as workout…").font(Obs.mono(16)).foregroundStyle(Obs.paper)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                         .background(Obs.activityAccent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 Button { store.delete(sessionID: session.id); dismiss() } label: {
-                    Text("Not a workout").font(.system(size: 15, weight: .medium)).foregroundStyle(Obs.ink2)
+                    Text("Not a workout").font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                         .frame(maxWidth: .infinity).padding(.vertical, 12)
                 }
             }
         } else if session.isUser, let w = store.userWorkout(sessionID: session.id) {
             HStack(spacing: 10) {
                 Button { editing = w } label: {
-                    Label("Edit", systemImage: "pencil").font(.system(size: 15, weight: .semibold))
+                    Label("Edit", systemImage: "pencil").font(Obs.mono(15))
                         .foregroundStyle(Obs.ink).frame(maxWidth: .infinity).padding(.vertical, 13)
                         .background(Obs.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 Button { confirmDelete = true } label: {
-                    Label("Delete", systemImage: "trash").font(.system(size: 15, weight: .semibold))
+                    Label("Delete", systemImage: "trash").font(Obs.mono(15))
                         .foregroundStyle(Obs.alert).frame(maxWidth: .infinity).padding(.vertical, 13)
                         .background(Obs.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
@@ -704,7 +716,7 @@ struct StatTile: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 if let value {
                     Text(value).font(Obs.rounded(26, .bold)).foregroundStyle(Obs.ink)
-                    if !unit.isEmpty { Text(unit).font(.system(size: 13)).foregroundStyle(Obs.ink2) }
+                    if !unit.isEmpty { Text(unit).font(Obs.mono(13)).foregroundStyle(Obs.ink2) }
                 } else if loading {
                     ProgressView().controlSize(.small).tint(Obs.ink2)
                 } else {
@@ -782,7 +794,6 @@ struct ActivityTab<Header: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header()
-                DayStrip(days: days, selection: $day)
                 VStack(alignment: .leading, spacing: 18) {
                     rings
                     if let active = store.active {
@@ -797,6 +808,11 @@ struct ActivityTab<Header: View>: View {
                     .obsCard()
                 }
                 .padding(.horizontal, 20)
+                // Day picker at the end of the page, as on Today.
+                DayStrip(days: days, selection: $day, title: "Days · steps") { d in
+                    s.activity_daily[d]?.steps.map { Fmt.count($0) }
+                }
+                .padding(.top, 8)
             }
             .padding(.bottom, 30)
         }
@@ -836,7 +852,7 @@ struct ActivityTab<Header: View>: View {
             }
             Button { showGoals = true } label: {
                 Text("Goals: \(Fmt.count(ActivityGoals.activeKcal)) kcal · \(Fmt.count(ActivityGoals.steps)) steps")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Obs.muted)
+                    .font(Obs.mono(12)).foregroundStyle(Obs.muted)
             }
             .buttonStyle(.plain)
             .id(goalsVersion)
@@ -890,7 +906,7 @@ struct ActivityTab<Header: View>: View {
             if ws.isEmpty {
                 Text(day == today ? "No workouts yet today. Start one above, or log one you've done."
                                   : "No workouts on this day.")
-                    .font(.system(size: 14)).foregroundStyle(Obs.ink2)
+                    .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
             } else {
                 ForEach(ws) { w in
                     Button { selected = w } label: {

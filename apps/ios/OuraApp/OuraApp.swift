@@ -25,7 +25,8 @@ struct TodayCard: View {
                         HStack {
                             ObsTag("sleep", icon: "moon.fill")
                             Spacer()
-                            Text(Fmt.duration(seconds: n.durationS))
+                            // Time asleep, not time in bed.
+                            Text("\(Fmt.duration(seconds: asleepSeconds(n) ?? n.durationS)) asleep")
                                 .font(Obs.mono(11)).foregroundStyle(Obs.ink2)
                             Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                         }
@@ -363,10 +364,10 @@ struct SyncView: View {
                 .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(Obs.ink)
+                Text(title).font(Obs.mono(15)).foregroundStyle(Obs.ink)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail {
-                    Text(detail).font(.footnote).foregroundStyle(Obs.ink2)
+                    Text(detail).font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -400,7 +401,7 @@ struct SyncView: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(keyFocused ? Obs.muted : Obs.rule))
             if !key.isEmpty && !validKey {
                 Text("Use all 32 characters: numbers 0–9 and letters A–F.")
-                    .font(.footnote)
+                    .font(Obs.mono(13))
                     .foregroundStyle(Obs.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -417,12 +418,12 @@ struct SyncView: View {
             } label: {
                 (Text("No key? ").foregroundStyle(Obs.ink2)
                  + Text("Pair a factory-reset ring").foregroundStyle(Obs.ink).underline())
-                    .font(.footnote)
+                    .font(Obs.mono(13))
             }
             .buttonStyle(.plain)
             .disabled(ring.busy)
             Text("Write the new key down: it cannot be read back from the ring.")
-                .font(.footnote)
+                .font(Obs.mono(13))
                 .foregroundStyle(Obs.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -436,18 +437,18 @@ struct SyncView: View {
                     ProgressView().tint(Obs.ink).frame(width: 24, height: 24)
                 } else {
                     Image(systemName: ring.lastReport != nil ? "checkmark.circle" : "info.circle")
-                        .font(.title3)
+                        .font(Obs.mono(20))
                         .foregroundStyle(ring.lastReport != nil ? Obs.good : Obs.ink2)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(ring.busy ? "Sync in progress" : (ring.connectionIssue ?? (ring.lastReport != nil ? "Your ring is up to date" : "Sync status")))
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(Obs.ink)
+                        .font(Obs.mono(15)).foregroundStyle(Obs.ink)
                     Text(ring.status)
-                        .font(.subheadline).foregroundStyle(Obs.ink2)
+                        .font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                     if ring.busy {
                         Text("Keep the app open. If the connection drops, sync resumes automatically.")
-                            .font(.footnote).foregroundStyle(Obs.ink2)
+                            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -464,7 +465,7 @@ struct SyncView: View {
             if ring.busy {
                 Button { ring.pause() } label: {
                     Label("Pause sync", systemImage: "pause")
-                        .font(.body.weight(.medium))
+                        .font(Obs.mono(16))
                         .frame(maxWidth: .infinity, minHeight: 52)
                         .foregroundStyle(Obs.ink)
                         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Obs.rule))
@@ -481,7 +482,7 @@ struct SyncView: View {
                         Text("Connect & sync")
                         Image(systemName: "arrow.right")
                     }
-                    .font(.body.weight(.semibold))
+                    .font(Obs.mono(16))
                     .frame(maxWidth: .infinity, minHeight: 54)
                     .foregroundStyle(validKey ? Obs.paper : Obs.muted)
                     .background(validKey ? Obs.ink : Obs.rule, in: RoundedRectangle(cornerRadius: 14))
@@ -489,7 +490,7 @@ struct SyncView: View {
                 .buttonStyle(.plain)
                 .disabled(!validKey)
                 Text("Your first sync may take a few minutes.")
-                    .font(.footnote).foregroundStyle(Obs.ink2)
+                    .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -501,7 +502,7 @@ struct SyncView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Help & diagnostics")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(Obs.ink)
+                    .font(Obs.mono(15)).foregroundStyle(Obs.ink)
                 Spacer()
                 Text(appVersion).font(Obs.mono(11)).foregroundStyle(Obs.muted)
             }
@@ -618,8 +619,8 @@ private struct SupportRowLabel: View {
                 .background(Obs.paper.opacity(0.85), in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(tint)
-                Text(detail).font(.footnote).foregroundStyle(Obs.muted)
+                Text(title).font(Obs.mono(15)).foregroundStyle(tint)
+                Text(detail).font(Obs.mono(13)).foregroundStyle(Obs.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
@@ -654,14 +655,14 @@ private struct TechnicalReportsView: View {
                 HStack(spacing: 10) {
                     Button { onShare() } label: {
                         Label("Share report", systemImage: "square.and.arrow.up")
-                            .font(.subheadline.weight(.medium))
+                            .font(Obs.mono(15))
                             .lineLimit(1).minimumScaleFactor(0.85)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Obs.rule))
                     }
                     Button { onCheck() } label: {
                         Label("Check data", systemImage: "externaldrive")
-                            .font(.subheadline.weight(.medium))
+                            .font(Obs.mono(15))
                             .lineLimit(1).minimumScaleFactor(0.85)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Obs.rule))
@@ -677,15 +678,15 @@ private struct TechnicalReportsView: View {
                 }
                 section("Incidents · \(store.incidents.count)", copy: nil) {
                     if store.incidents.isEmpty {
-                        Text("No incidents recorded.").font(.caption).foregroundStyle(Obs.muted)
+                        Text("No incidents recorded.").font(Obs.mono(12)).foregroundStyle(Obs.muted)
                     }
                     ForEach(store.incidents.prefix(8)) { item in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(item.title).font(.caption.weight(.medium)).foregroundStyle(Obs.ink)
+                                Text(item.title).font(Obs.mono(12)).foregroundStyle(Obs.ink)
                                 Spacer()
                                 Text(item.date, format: .dateTime.month(.abbreviated).day().hour().minute())
-                                    .font(.caption2).foregroundStyle(Obs.muted)
+                                    .font(Obs.mono(11)).foregroundStyle(Obs.muted)
                             }
                             Text(item.preview).font(.caption.monospaced()).foregroundStyle(Obs.ink2)
                                 .lineLimit(5).frame(maxWidth: .infinity, alignment: .leading)
@@ -716,7 +717,7 @@ private struct TechnicalReportsView: View {
                                 flash("summary")
                             }
                         }
-                        .font(.caption.weight(.medium)).foregroundStyle(Obs.ink).frame(minHeight: 32)
+                        .font(Obs.mono(12)).foregroundStyle(Obs.ink).frame(minHeight: 32)
                     }
                     if diag.totalLines > 0 {
                         ScrollView {
@@ -732,7 +733,7 @@ private struct TechnicalReportsView: View {
                         .frame(maxHeight: 260)
                         .background(Obs.paper.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
                     } else {
-                        Text("Nothing logged yet.").font(.caption).foregroundStyle(Obs.muted)
+                        Text("Nothing logged yet.").font(Obs.mono(12)).foregroundStyle(Obs.muted)
                     }
                 }
             }
@@ -764,7 +765,7 @@ private struct TechnicalReportsView: View {
             UIPasteboard.general.string = text
             flash(id)
         }
-        .font(.caption.weight(.medium)).foregroundStyle(Obs.ink).frame(minHeight: 32)
+        .font(Obs.mono(12)).foregroundStyle(Obs.ink).frame(minHeight: 32)
     }
 
     private func flash(_ id: String) {
@@ -928,6 +929,8 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(.dark)
+        // Everything without its own font (form rows, buttons, sheets) uses the terminal monospace.
+        .font(Obs.mono(15))
         .fullScreenCover(item: $report) { sel in if let s { DayReportView(s: s.withUserWorkouts(workouts), day: sel.day, tab: sel.sleep ? .sleep : .activity) } }
         .sheet(isPresented: $showAllDays) { if let s { AllDaysView(s: s.withUserWorkouts(workouts)) } }
         .sheet(isPresented: $showStartWorkout) { StartWorkoutSheet() }
@@ -1194,10 +1197,10 @@ struct RootView: View {
     private func errorCard(_ err: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             ObsTag("no data yet", icon: "antenna.radiowaves.left.and.right")
-            Text(err).font(.system(size: 14)).foregroundStyle(Obs.ink2)
+            Text(err).font(Obs.mono(14)).foregroundStyle(Obs.ink2)
                 .fixedSize(horizontal: false, vertical: true)
             Button { showSync = true } label: {
-                Text("Connect your ring").font(.system(size: 15, weight: .semibold))
+                Text("Connect your ring").font(Obs.mono(15))
                     .foregroundStyle(Obs.paper).frame(maxWidth: .infinity).padding(.vertical, 12)
                     .background(Obs.ink, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }.buttonStyle(.plain)
@@ -1303,10 +1306,10 @@ struct RootView: View {
                     if let r = readiness {
                         SignalBadge(text: readinessBand(r.score))
                         Text(readinessHeadline(r.score))
-                            .font(.system(size: 19, weight: .medium)).foregroundStyle(Obs.ink)
+                            .font(Obs.mono(19)).foregroundStyle(Obs.ink)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(s.digest ?? readinessSummary(r))
-                            .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                         Button { withAnimation(.easeOut(duration: 0.2)) { readinessExpanded.toggle() } } label: {
                             Text(readinessExpanded ? "HIDE CONTRIBUTORS" : "VIEW CONTRIBUTORS ›")
@@ -1317,7 +1320,7 @@ struct RootView: View {
                     } else {
                         Text(night == nil ? "Wear your ring to bed, then sync in the morning."
                                           : "Readiness appears after a few nights have been synced: it compares each night with your own baseline.")
-                            .font(.system(size: 14)).foregroundStyle(Obs.ink2)
+                            .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -1329,7 +1332,7 @@ struct RootView: View {
                     SleepScoreCard(score: r, framed: false)
                     if r.provisional == true {
                         Text("Readiness compares each night with your own recent nights. It becomes settled after about two weeks of synced nights.")
-                            .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -1406,7 +1409,7 @@ struct RootView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "sparkles").foregroundStyle(Obs.signal)
                     Text(count == 1 ? "1 detected workout to review" : "\(count) detected workouts to review")
-                        .font(.system(size: 15, weight: .medium)).foregroundStyle(Obs.ink)
+                        .font(Obs.mono(15)).foregroundStyle(Obs.ink)
                     Spacer()
                     Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Obs.muted)
                 }
@@ -1490,11 +1493,10 @@ struct RootView: View {
             errorCard(err)
         } else if nightDays.isEmpty {
             Text("No nights yet. Wear your ring to bed, then sync in the morning.")
-                .font(.system(size: 15)).foregroundStyle(Obs.ink2)
+                .font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                 .obsCard().padding(.horizontal, 20)
         } else {
             let day = nightDays.contains(sleepDay) ? sleepDay : nightDays[0]
-            DayStrip(days: nightDays, selection: Binding(get: { day }, set: { sleepDay = $0 }))
             VStack(alignment: .leading, spacing: 18) {
                 if let n = s.night(forDay: day) {
                     sleepHero(n)
@@ -1508,6 +1510,12 @@ struct RootView: View {
                 }
             }
             .padding(.horizontal, 20)
+            // Night picker at the end of the page, as on Today.
+            DayStrip(days: nightDays, selection: Binding(get: { day }, set: { sleepDay = $0 }),
+                     title: "Nights · sleep score") { d in
+                s.night(forDay: d)?.mainSleepScore.map { "\(Int($0.score))" }
+            }
+            .padding(.top, 8)
         }
     }
 
@@ -1527,7 +1535,7 @@ struct RootView: View {
 
     private func heroStat(_ label: String, _ value: String?) -> some View {
         HStack {
-            Text(label).font(.system(size: 13)).foregroundStyle(Obs.muted)
+            Text(label).font(Obs.mono(13)).foregroundStyle(Obs.muted)
             Spacer()
             Text(value ?? "–").font(Obs.mono(15, .semibold)).foregroundStyle(Obs.ink)
         }
@@ -1621,7 +1629,7 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ObsTag("ring clock", icon: "clock.badge.exclamationmark")
                         ForEach(warnings, id: \.self) { w in
-                            Text("• \(w)").font(.system(size: 13)).foregroundStyle(Obs.bad)
+                            Text("• \(w)").font(Obs.mono(13)).foregroundStyle(Obs.bad)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1634,7 +1642,7 @@ struct RootView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ObsTag("on-device models", icon: "exclamationmark.triangle")
                         ForEach(s.modelErrors, id: \.self) { e in
-                            Text("• \(e)").font(.system(size: 13)).foregroundStyle(Obs.bad)
+                            Text("• \(e)").font(Obs.mono(13)).foregroundStyle(Obs.bad)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -1653,7 +1661,7 @@ struct RootView: View {
                 ObsTag("your ring", icon: "circle.circle")
                 Spacer()
                 Button { showSync = true } label: {
-                    Text("Manage").font(.system(size: 13, weight: .semibold)).foregroundStyle(Obs.ink2)
+                    Text("Manage").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                 }.buttonStyle(.plain)
             }
             ObsStat(label: "Battery",
@@ -1774,8 +1782,15 @@ struct OuraApp: App {
         UITabBar.appearance().scrollEdgeAppearance = tabs
         let nav = UINavigationBarAppearance()
         nav.configureWithTransparentBackground()
-        nav.titleTextAttributes = [.foregroundColor: UIColor.white]
-        nav.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        // Screen titles in the terminal fonts: pixel for large titles, monospace inline.
+        let navFont = UIFont(name: "ShareTechMono-Regular", size: 17) ?? .monospacedSystemFont(ofSize: 17, weight: .regular)
+        let navLarge = UIFont(name: "VT323-Regular", size: 44) ?? .monospacedSystemFont(ofSize: 34, weight: .regular)
+        nav.titleTextAttributes = [.foregroundColor: UIColor.white, .font: navFont]
+        nav.largeTitleTextAttributes = [.foregroundColor: UIColor.white, .font: navLarge]
+        let barButton = UIBarButtonItemAppearance()
+        barButton.normal.titleTextAttributes = [.font: navFont]
+        nav.buttonAppearance = barButton
+        nav.doneButtonAppearance = barButton
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = nav
     }
@@ -1815,7 +1830,7 @@ struct ImportedDayView: View {
                 }
                 .obsCard()
                 Text("This day comes from your Oura export, which has Oura's daily figures but not the ring's minute-by-minute data, so there's no sleep-stage or heart-rate chart for it.")
-                    .font(.system(size: 13)).foregroundStyle(Obs.ink2)
+                    .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)

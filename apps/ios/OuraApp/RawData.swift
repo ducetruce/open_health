@@ -170,12 +170,12 @@ struct RawDataView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 if let error {
-                    Text(error).font(.subheadline).foregroundStyle(Obs.alert)
+                    Text(error).font(Obs.mono(15)).foregroundStyle(Obs.alert)
                 } else if loading {
                     ProgressView().tint(Obs.ink).frame(maxWidth: .infinity)
                 } else if kinds.isEmpty {
                     Text("Nothing stored yet. Sync the ring and come back.")
-                        .font(.subheadline).foregroundStyle(Obs.ink2)
+                        .font(Obs.mono(15)).foregroundStyle(Obs.ink2)
                 } else {
                     kindList
                     if !filter.isEmpty {
@@ -217,7 +217,7 @@ struct RawDataView: View {
                 .buttonStyle(.plain)
             }
             Text("Count shown as decoded/total when some bodies have no decoder yet.")
-                .font(.footnote).foregroundStyle(Obs.ink2)
+                .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .obsCard()
@@ -242,10 +242,10 @@ struct RawDataView: View {
             }
             if fields.isEmpty {
                 Text("No numeric fields in these events.")
-                    .font(.footnote).foregroundStyle(Obs.ink2)
+                    .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
             } else if field == nil {
                 Text("Pick a field to plot it over time.")
-                    .font(.footnote).foregroundStyle(Obs.ink2)
+                    .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
             } else {
                 TimeSeriesChart(points: points)
                     .frame(height: 180)

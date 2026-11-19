@@ -46,7 +46,7 @@ struct ResearchExportView: View {
                     )) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(o.title).foregroundStyle(Obs.ink)
-                            Text(o.detail).font(.footnote).foregroundStyle(Obs.muted)
+                            Text(o.detail).font(Obs.mono(13)).foregroundStyle(Obs.muted)
                         }
                     }
                 }
@@ -59,7 +59,7 @@ struct ResearchExportView: View {
                     .disabled(!FileManager.default.fileExists(atPath: DB.url.path))
                 if let lastMarker {
                     Text("Marked at \(lastMarker.formatted(date: .omitted, time: .standard))")
-                        .font(.footnote).foregroundStyle(Obs.muted)
+                        .font(Obs.mono(13)).foregroundStyle(Obs.muted)
                 }
             } header: {
                 Text("Markers")
@@ -69,7 +69,7 @@ struct ResearchExportView: View {
             Section {
                 Button(working ? "Preparing…" : "Export ZIP") { Task { await run() } }
                     .disabled(working || selected.isEmpty || end <= start)
-                if let message { Text(message).font(.footnote).foregroundStyle(Obs.muted) }
+                if let message { Text(message).font(Obs.mono(13)).foregroundStyle(Obs.muted) }
             } footer: {
                 Text("Each row is one value the ring recorded; nothing is averaged or scored. A README in the ZIP describes every column.")
             }

@@ -109,8 +109,9 @@ enum Obs {
     static func label(_ size: CGFloat = 11) -> Font {
         .custom("ShareTechMono-Regular", fixedSize: size)
     }
+    /// Body copy, in the terminal monospace like everything else.
     static func prose(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight)
+        mono(size, weight)
     }
 }
 
@@ -187,7 +188,7 @@ struct ObsStat: View {
     var accent: Color = Obs.ink
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).font(.system(size: 14)).foregroundStyle(Obs.ink2)
+            Text(label).font(Obs.mono(14)).foregroundStyle(Obs.ink2)
             Spacer(minLength: 16)
             Text(value).font(Obs.mono(15, .semibold)).foregroundStyle(accent)
                 .monospacedDigit()

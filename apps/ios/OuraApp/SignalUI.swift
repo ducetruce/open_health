@@ -97,7 +97,7 @@ struct SignalTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(name).font(.system(size: 12)).foregroundStyle(Obs.ink2).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(name).font(Obs.mono(12)).foregroundStyle(Obs.ink2).lineLimit(1).minimumScaleFactor(0.8)
                     Spacer(minLength: 2)
                     Text(index).font(Obs.mono(10)).foregroundStyle(Obs.muted)
                 }
@@ -207,8 +207,8 @@ struct LogMenuSheet: View {
                     .frame(width: 40, height: 40)
                     .overlay(Rectangle().strokeBorder(Obs.signalDim, lineWidth: 1))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 16)).foregroundStyle(Obs.ink)
-                    Text(sub).font(.system(size: 12)).foregroundStyle(Obs.muted)
+                    Text(title).font(Obs.mono(16)).foregroundStyle(Obs.ink)
+                    Text(sub).font(Obs.mono(12)).foregroundStyle(Obs.muted)
                 }
                 Spacer()
                 Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(Obs.muted)
