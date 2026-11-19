@@ -99,7 +99,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     func format(_ v: Double) -> String {
         switch self {
         case .asleep: return Fmt.duration(seconds: v)
-        case .temperature: return String(format: "%.1f", v)
+        case .temperature: return String(format: "%+.1f", v)   // change from baseline
         case .breathing: return String(format: "%.1f", v)
         case .steps, .activeKcal: return Fmt.count(v)
         default: return "\(Int(v.rounded()))"
@@ -129,7 +129,10 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .breathing: return d.breath_rate
         case .steps: return d.steps
         case .activeKcal: return d.active_kcal
-        case .temperature, .oxygen: return nil  // the export has a deviation, not a level
+        // Oura's export records skin temperature as a deviation (°C), the same measure
+        // the ring nights are shown in.
+        case .temperature: return d.temp_deviation.map { Convert.temperatureDelta($0, UnitSettings.shared.temperature) }
+        case .oxygen: return nil
         }
     }
 
@@ -143,8 +146,11 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .restingHR: return s.nightlySeries(\.rhr)
         case .hrv: return s.nightlySeries(\.hrv_ms)
         case .temperature:
+            // Change from the wearer's baseline (see SkinTemp), not the raw finger reading.
             let unit = UnitSettings.shared.temperature
-            return s.nightlySeries(\.skin_temp).map { DatedVital(date: $0.date, value: Convert.temperature($0.value, unit)) }
+            return SkinTemp.nights(in: s).compactMap { n in
+                n.deviation.map { DatedVital(date: n.date, value: Convert.temperatureDelta($0, unit)) }
+            }
         case .oxygen: return s.nightlySeries(\.spo2_mean)
         case .breathing: return s.nightlySeries(\.breath_rate)
         case .steps: return s.activity_daily.compactMap { day, st in st.steps.map { DatedVital(date: day, value: $0) } }

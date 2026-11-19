@@ -304,6 +304,15 @@ struct VitalTrendView: View {
                             ForEach(VitalPeriod.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
+                        if kind == .temp, let window {
+                            // Skin temperature reads as the change from the wearer's baseline.
+                            SkinTemperatureSection(
+                                nights: SkinTemp.nights(in: s).filter { $0.date >= window.start && $0.date <= window.end },
+                                unit: UnitSettings.shared.temperature)
+                        } else if kind == .temp {
+                            Text("No readings yet.")
+                                .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                        } else {
                         if let last = points.last {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(format(last.value)).font(Obs.mono(34, .medium)).foregroundStyle(Obs.ink)
@@ -336,6 +345,7 @@ struct VitalTrendView: View {
                         } else {
                             Text("Not enough nights in this period yet.")
                                 .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                        }
                         }
                     }
                     .padding(24)

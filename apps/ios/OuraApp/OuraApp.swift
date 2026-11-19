@@ -1541,11 +1541,20 @@ struct RootView: View {
                     }
                     Rectangle().fill(Obs.rule).frame(height: 1)
                     HStack(alignment: .top, spacing: 24) {
+                        // Skin temperature as the change from the baseline; the raw reading
+                        // moves to the detail line (and stays the value until a baseline exists).
+                        let tempNights = SkinTemp.nights(in: s)
+                        let lastTemp = tempNights.last
                         VitalCell(tag: "skin temp",
-                                  value: Fmt.temperature(latestTemp?.skin_temp, tempUnit),
+                                  value: lastTemp?.deviation.map { SkinTemp.signed($0, tempUnit) }
+                                      ?? Fmt.temperature(latestTemp?.skin_temp, tempUnit),
                                   unit: tempUnit.symbol,
-                                  series: recentTemperatures,
-                                  detail: latestTemp.map { latestLabel(date: s.wakeYmd($0)) },
+                                  series: lastTemp?.deviation == nil ? recentTemperatures
+                                      : tempNights.suffix(14).compactMap(\.deviation).map { Convert.temperatureDelta($0, tempUnit) },
+                                  detail: lastTemp.map { n in
+                                      n.deviation == nil ? latestLabel(date: n.date)
+                                          : "vs baseline · \(Fmt.temperature(n.celsius, tempUnit)) \(tempUnit.symbol) skin"
+                                  },
                                   action: { vital = .temp })
                         VitalCell(tag: "blood o₂", value: f(latestOxygen?.spo2_mean), unit: "%",
                                   series: recentOxygen,

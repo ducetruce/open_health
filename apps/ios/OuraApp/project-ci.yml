@@ -55,6 +55,7 @@ targets:
       - path: Units.swift
       - path: TrendsView.swift
       - path: SignalUI.swift
+      - path: SkinTemperature.swift
       - path: BackgroundSync.swift
       - path: BLETransport.swift
       - path: RingSync.swift
