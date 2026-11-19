@@ -149,6 +149,13 @@ pub fn step_rate(params: Option<&Value>, met: f64) -> f64 {
     }
 }
 
+/// Active kilocalories in one minute at `met`, from an imported calibration's
+/// `active_kcal` block; `None` without one (the caller then uses its MET formula).
+pub fn active_kcal_rate(params: Option<&Value>, met: f64) -> Option<f64> {
+    let rates = params?["active_kcal"]["rates"].as_array().filter(|r| r.len() == STEP_EDGES.len())?;
+    Some(step_bin(met).and_then(|b| rates[b].as_f64()).unwrap_or(0.0))
+}
+
 /// Contributors fitted on only the most recent N usable days.
 const RECENT_ONLY: &[(&str, usize)] = &[("Sleep Timin Score", 250)];
 
@@ -994,12 +1001,24 @@ fn fit_contributor(rows: &[Row], contributor: &str, drivers: &[&str], kind: Kind
 /// export's daily step counts (non-negative least squares by dropping negative
 /// bins and refitting). Returns `{edges, rates, days, mean_abs_error}`.
 fn fit_steps(rows: &[Row]) -> Option<Value> {
+    fit_per_minute(rows, "Steps")
+}
+
+/// Active kilocalories per minute per MET bin, fitted the same way against the
+/// export's daily active calories (Oura leaves low-level movement out).
+fn fit_active_kcal(rows: &[Row]) -> Option<Value> {
+    fit_per_minute(rows, "Active Calories")
+}
+
+/// Per-minute rates per MET bin such that each day's minutes × rates reproduce its
+/// daily total in `column`.
+fn fit_per_minute(rows: &[Row], column: &str) -> Option<Value> {
     let data: Vec<(Vec<f64>, f64)> = rows
         .iter()
         .filter_map(|r| {
             let bins: Vec<f64> = r.get("met_bins")?.as_array()?.iter().filter_map(Value::as_f64).collect();
-            let steps = get(r, "Steps")?;
-            (bins.len() == STEP_EDGES.len() && steps > 0.0).then_some((bins, steps))
+            let total = get(r, column)?;
+            (bins.len() == STEP_EDGES.len() && total > 0.0).then_some((bins, total))
         })
         .collect();
     if data.len() < 30 {
@@ -1033,7 +1052,7 @@ fn fit_steps(rows: &[Row]) -> Option<Value> {
         / data.len() as f64;
     Some(json!({
         "edges": STEP_EDGES,
-        "rates": rates.iter().map(|r| (r * 10.0).round() / 10.0).collect::<Vec<_>>(),
+        "rates": rates.iter().map(|r| (r * 1000.0).round() / 1000.0).collect::<Vec<_>>(),
         "days": data.len(),
         "mean_abs_error": mae.round(),
     }))
@@ -1042,6 +1061,7 @@ fn fit_steps(rows: &[Row]) -> Option<Value> {
 fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Value> {
     engineer(&mut rows);
     let steps = fit_steps(&rows);
+    let active_kcal = fit_active_kcal(&rows);
 
     // calibration
     let mut weights = Map::new();
@@ -1099,6 +1119,7 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
             "weights": weights,
             "contributors": contributors,
             "steps": steps,
+            "active_kcal": active_kcal,
         },
     });
     let out = path(db);
@@ -1113,6 +1134,7 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, source: &str) -> Result<Va
         "calibration_days": days_used,
         "source": source,
         "steps_calibrated": steps.is_some(),
+        "active_kcal_calibrated": active_kcal.is_some(),
     }))
 }
 
@@ -1229,6 +1251,8 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
         // True steps per minute per MET bin, to be recovered by `fit_steps`.
         const TRUE_RATES: [f64; 7] = [0.0, 4.0, 25.0, 95.0, 112.0, 140.0, 160.0];
         const BIN_MET: [f64; 7] = [1.7, 2.2, 2.7, 3.5, 5.0, 7.0, 9.0];
+        // True active kcal per minute per MET bin.
+        const TRUE_KCAL: [f64; 7] = [0.0, 0.5, 1.6, 2.6, 4.1, 6.2, 8.3];
         for i in 0..days {
             let day = format!("2025-{:02}-{:02}", 1 + (i / 28) % 12, 1 + i % 28);
             let f = i as f64;
@@ -1262,16 +1286,19 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
             // A day of 1440 one-minute MET values: mostly rest, then varying minutes per bin.
             let mut mets: Vec<String> = Vec::new();
             let mut steps = 0.0;
+            let mut kcal = 0.0;
             for (b, met) in BIN_MET.iter().enumerate() {
                 let minutes = 10 + (i * (b + 3) * 7) % 90;
                 steps += minutes as f64 * TRUE_RATES[b];
+                kcal += minutes as f64 * TRUE_KCAL[b];
                 mets.extend(std::iter::repeat(format!("{met}")).take(minutes));
             }
             while mets.len() < 1440 {
                 mets.push("1.0".into());
             }
             activity.push_str(&format!(
-                "a{i};300;1.5;\"{{}}\";{day};\"{{\"\"interval\"\": 60.0, \"\"items\"\": [{}]}}\";80;{}\n",
+                "a{i};{};1.5;\"{{}}\";{day};\"{{\"\"interval\"\": 60.0, \"\"items\"\": [{}]}}\";80;{}\n",
+                kcal.round(),
                 mets.join(", "),
                 steps.round()
             ));
@@ -1304,6 +1331,11 @@ Previous Day Activity Score,Recovery Index Score,Activity Balance Score\n",
             assert!((fitted - truth).abs() < 1.0, "{rates:?}");
         }
         assert!((step_rate(Some(params), 3.5) - 95.0).abs() < 1.0);
+        // Active kcal per minute per MET level likewise.
+        assert_eq!(result["active_kcal_calibrated"], true);
+        let kcal_rate = active_kcal_rate(Some(params), 5.0).unwrap();
+        assert!((kcal_rate - 4.1).abs() < 0.1, "{kcal_rate}");
+        assert_eq!(active_kcal_rate(None, 5.0), None);
         assert_eq!(step_rate(None, 1.2), 0.0);
         // Sleep weights are learned from the contributors: the generator used 35/15/10…
         let w = &params["weights"][SLEEP];

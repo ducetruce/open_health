@@ -3043,11 +3043,14 @@ pub fn build_summary(
                     prof_sum.entry(key.clone()).or_insert([0.0; 96])[bucket] += (mv - 1.0).max(0.0);
                     prof_cnt.entry(key.clone()).or_insert([0; 96])[bucket] += 1;
                     let step_rate = oura_export::step_rate(step_params, mv);
+                    // Active kcal this minute: learned from an imported Oura export when
+                    // there is one, else MET above rest × body weight.
+                    let kcal = oura_export::active_kcal_rate(step_params, mv)
+                        .unwrap_or_else(|| (mv - 1.0).max(0.0) * weight / 60.0);
                     let e = daily.entry(key).or_insert((0.0, 0.0));
-                    e.0 += (mv - 1.0).max(0.0) * weight / 60.0;
+                    e.0 += kcal;
                     e.1 += step_rate;
-                    *met_min.entry((local / 60.0).floor() as i64).or_insert(0.0) +=
-                        (mv - 1.0).max(0.0);
+                    *met_min.entry((local / 60.0).floor() as i64).or_insert(0.0) += kcal;
                 }
             }
         }
@@ -3069,10 +3072,8 @@ pub fn build_summary(
             Some(days_from_civil(y, mo, dd) * 1440 + hh * 60 + mm)
         };
         if let Some(m0) = parse() {
-            let kcal: f64 = (m0..m0 + dur as i64)
-                .filter_map(|m| met_min.get(&m))
-                .map(|met| met * weight / 60.0)
-                .sum();
+            // `met_min` already holds each minute's active kcal.
+            let kcal: f64 = (m0..m0 + dur as i64).filter_map(|m| met_min.get(&m)).sum();
             sess["active_kcal"] = json!(kcal.round());
         }
     }
