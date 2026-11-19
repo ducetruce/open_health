@@ -1683,13 +1683,6 @@ struct SleepReport: View {
                 bedtimeEditor(n)
             }
 
-            if n.stagesEstimated {
-                Text(n.sleep_wake_source == "ring"
-                     ? "Estimated stages. Asleep versus awake comes from your ring; deep, light and REM are estimated from heart rate, HRV and movement, because Oura's staging model isn't in this build."
-                     : "Estimated stages, from heart rate, HRV and movement: Oura's staging model isn't in this build, and your ring didn't provide its own.")
-                    .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             if let score = n.oura_sleep_score {
                 Rule("sleep score · Oura scale")
                 SleepScoreCard(score: score, breathRate: n.breath_rate)
