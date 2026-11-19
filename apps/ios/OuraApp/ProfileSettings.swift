@@ -140,6 +140,22 @@ struct ProfileSettingsView: View {
         }
     }
 
+    /// The app's own folder in the Files app (On My iPhone → Open Oura → Oura export).
+    /// Files copied there are read directly, with no document picker involved.
+    static var dropFolder: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("Oura export", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Import whatever export files are in the app's own Files folder (any subfolder).
+    private func importFromDropFolder() {
+        _ = Self.dropFolder
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        importExport([docs])
+    }
+
     private func importExport(_ urls: [URL]) {
         importingExport = true
         importStatus = nil
@@ -267,14 +283,20 @@ struct ProfileSettingsView: View {
                         LabeledContent("Scores calibrated", value: calibrationText(info))
                     }
                     Button {
-                        choosingExport = true
+                        importFromDropFolder()
                     } label: {
                         HStack {
-                            Label(ouraImport == nil ? "Import Oura export" : "Replace with a newer export",
-                                  systemImage: "square.and.arrow.down")
+                            Label("Import from the Open Oura folder", systemImage: "folder")
                             Spacer()
                             if importingExport { ProgressView() }
                         }
+                    }
+                    .disabled(importingExport)
+                    Button {
+                        choosingExport = true
+                    } label: {
+                        Label(ouraImport == nil ? "Pick files to import…" : "Pick newer files to import…",
+                              systemImage: "square.and.arrow.down")
                     }
                     .disabled(importingExport)
                     if ouraImport != nil {
@@ -291,7 +313,7 @@ struct ProfileSettingsView: View {
                 } header: {
                     Text("Oura history")
                 } footer: {
-                    Text("Select these files from the unzipped Oura export: dailysleep, dailyreadiness, sleepmodel, dailyactivity and dailyspo2 (an older trends CSV works too). This fits Readiness and Sleep to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
+                    Text("In the Files app, copy dailysleep, dailyreadiness, sleepmodel, dailyactivity and dailyspo2 from your unzipped Oura export into On My iPhone → Open Oura → Oura export, then tap Import from the Open Oura folder (an older trends CSV works too). This fits Readiness and Sleep to Oura's own scale and adds your history from before this app. It stays on this iPhone.")
                 }
                 .fileImporter(isPresented: $choosingExport,
                               // No `.folder` here: with it, iOS's picker only lets folders be chosen.

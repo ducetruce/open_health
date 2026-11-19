@@ -1722,6 +1722,8 @@ struct OuraApp: App {
     init() {
         DiagStore.shared.bootstrap()
         BackgroundSync.register()
+        // Create the app's Files folder up front so it is there to copy an export into.
+        _ = ProfileSettingsView.dropFolder
         // Segmented pickers (Trends periods, chart windows): selected segment in the
         // signal green, labels in the terminal monospace.
         let seg = UISegmentedControl.appearance()
