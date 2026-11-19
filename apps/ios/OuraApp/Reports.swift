@@ -716,6 +716,7 @@ struct Readout: View {
 struct Polysomnograph: View {
     let night: NightRow
     @State private var cursorF: Double? = nil
+    @State private var cursorAxis: Axis? = nil
     private let gutterW: CGFloat = 76
     private let hypH: CGFloat = 84
     private let laneH: CGFloat = 44
@@ -809,9 +810,16 @@ struct Polysomnograph: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { g in cursorF = Double(max(0, min(1, (g.location.x - gutterW) / plotW))) }
-                .onEnded { _ in cursorF = nil })
+            // Sideways drags move the cursor; up and down drags scroll the page.
+            .simultaneousGesture(DragGesture(minimumDistance: 8)
+                .onChanged { g in
+                    if cursorAxis == nil {
+                        cursorAxis = abs(g.translation.width) > abs(g.translation.height) ? .horizontal : .vertical
+                    }
+                    guard cursorAxis == .horizontal else { return }
+                    cursorF = Double(max(0, min(1, (g.location.x - gutterW) / plotW)))
+                }
+                .onEnded { _ in cursorF = nil; cursorAxis = nil })
         }
         .frame(height: totalH)
     }

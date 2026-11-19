@@ -68,48 +68,122 @@ struct DayStrip: View {
     /// The value under each date (a score, a step count); nil shows a dash.
     var detail: (String) -> String? = { _ in nil }
 
+    /// Weeks of history the strip pages through.
+    private static let maxWeeks = 12
+    @State private var page: Int?
+
     private static let weekday: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE"; return f
     }()
+    private static let rangeStart: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("MMMd"); return f
+    }()
+    private static let rangeEnd: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("d"); return f
+    }()
+
+    /// Seven days per page, oldest page first; the last page holds the newest seven.
+    /// The oldest page may be short, so it is padded with blanks at its start.
+    private var pages: [[String?]] {
+        let ordered = Array(days.prefix(Self.maxWeeks * 7).reversed())
+        var out: [[String?]] = []
+        var hi = ordered.count
+        while hi > 0 {
+            let lo = max(0, hi - 7)
+            let week = ordered[lo..<hi].map { Optional($0) }
+            out.insert(Array(repeating: nil, count: 7 - week.count) + week, at: 0)
+            hi = lo
+        }
+        return out
+    }
 
     var body: some View {
+        let pages = pages
+        let current = min(page ?? pages.count - 1, max(0, pages.count - 1))
         VStack(alignment: .leading, spacing: 10) {
-            if let title {
-                Text(title.uppercased()).font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
-                    .padding(.horizontal, 20)
-            }
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(Array(days.prefix(60).reversed()), id: \.self) { day in
-                            let on = day == selection
-                            let date = WorkoutFormat.day.date(from: day)
-                            Button { selection = day } label: {
-                                VStack(spacing: 6) {
-                                    Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
-                                        .font(Obs.label(10))
-                                    Text(String(day.suffix(2))).font(Obs.pixel(18))
-                                    Text(detail(day) ?? "–").font(Obs.mono(11))
-                                        .lineLimit(1).minimumScaleFactor(0.6)
-                                }
-                                .foregroundStyle(on ? Obs.onSignal : Obs.ink2)
-                                .frame(width: 50).padding(.vertical, 10)
-                                .background(on ? Obs.signal : Color.clear, in: Capsule())
-                                .overlay(Capsule().strokeBorder(on ? Obs.signal : Obs.rule, lineWidth: 1))
-                                .contentShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .id(day)
-                            .accessibilityLabel("\(Fmt.day(day))\(detail(day).map { ", \($0)" } ?? "")")
-                            .accessibilityAddTraits(on ? .isSelected : [])
-                        }
-                    }
-                    .padding(.horizontal, 20)
+            HStack(alignment: .firstTextBaseline) {
+                if let title {
+                    Text(title.uppercased()).font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
                 }
-                .onAppear { proxy.scrollTo(selection, anchor: .trailing) }
-                .onChange(of: selection) { _, d in withAnimation { proxy.scrollTo(d, anchor: .center) } }
+                Spacer(minLength: 8)
+                if pages.indices.contains(current) {
+                    Text(rangeLabel(pages[current]).uppercased())
+                        .font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.signal)
+                }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(pages.indices, id: \.self) { p in
+                        HStack(spacing: 4) {
+                            ForEach(0..<7, id: \.self) { slot in
+                                if let day = pages[p][slot] {
+                                    pill(day)
+                                } else {
+                                    Color.clear.frame(maxWidth: .infinity)
+                                }
+                            }
+                        }
+                        .containerRelativeFrame(.horizontal)
+                        .id(p)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $page)
+            .defaultScrollAnchor(.trailing)
+            if pages.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(pages.indices, id: \.self) { p in
+                        Circle().fill(p == current ? Obs.signal : Obs.signalDim).frame(width: 5, height: 5)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
             }
         }
+        .onAppear { page = pageIndex(of: selection, in: pages) ?? pages.count - 1 }
+        .onChange(of: selection) { _, d in
+            if let p = pageIndex(of: d, in: pages), p != page { withAnimation { page = p } }
+        }
+    }
+
+    private func pill(_ day: String) -> some View {
+        let on = day == selection
+        let date = WorkoutFormat.day.date(from: day)
+        let value = detail(day)
+        return Button { selection = day } label: {
+            VStack(spacing: 6) {
+                Text(date.map { Self.weekday.string(from: $0).uppercased() } ?? "")
+                    .font(Obs.label(10))
+                Text(String(day.suffix(2))).font(Obs.pixel(18))
+                Text(value ?? "–").font(Obs.mono(11))
+                    .lineLimit(1).minimumScaleFactor(0.5)
+            }
+            .foregroundStyle(on ? Obs.onSignal : Obs.ink2)
+            .frame(maxWidth: .infinity).padding(.vertical, 10).padding(.horizontal, 2)
+            .background(on ? Obs.signal : Color.clear, in: Capsule())
+            .overlay(Capsule().strokeBorder(on ? Obs.signal : Obs.rule, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(Fmt.day(day))\(value.map { ", \($0)" } ?? "")")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func pageIndex(of day: String, in pages: [[String?]]) -> Int? {
+        pages.firstIndex { $0.contains(day) }
+    }
+
+    /// "Nov 13 – 19", or "Oct 28 – Nov 3" across a month boundary.
+    private func rangeLabel(_ week: [String?]) -> String {
+        let dates = week.compactMap { $0.flatMap { WorkoutFormat.day.date(from: $0) } }
+        guard let first = dates.first, let last = dates.last else { return "" }
+        let cal = Calendar.current
+        let end = cal.isDate(first, equalTo: last, toGranularity: .month)
+            ? Self.rangeEnd.string(from: last) : Self.rangeStart.string(from: last)
+        return first == last ? Self.rangeStart.string(from: first)
+            : "\(Self.rangeStart.string(from: first)) – \(end)"
     }
 }
 
@@ -771,6 +845,8 @@ struct WorkoutHRChart: View {
 
 struct ActivityTab<Header: View>: View {
     let s: Summary
+    /// What decides a redraw; see `TabInputs`.
+    let inputs: TabInputs
     let onEndWorkout: () -> Void
     @ViewBuilder var header: () -> Header
     @ObservedObject private var store = WorkoutStore.shared
@@ -806,16 +882,18 @@ struct ActivityTab<Header: View>: View {
                         ActivityReport(s: s, day: day, showSessions: false)
                     }
                     .obsCard()
+                    // Day picker at the end of the page, inside the card margins, as on Today.
+                    DayStrip(days: days, selection: $day, title: "Days · steps") { d in
+                        s.activity_daily[d]?.steps.map { Fmt.count($0) }
+                    }
+                    .padding(.top, 8)
                 }
                 .padding(.horizontal, 20)
-                // Day picker at the end of the page, as on Today.
-                DayStrip(days: days, selection: $day, title: "Days · steps") { d in
-                    s.activity_daily[d]?.steps.map { Fmt.count($0) }
-                }
-                .padding(.top, 8)
             }
             .padding(.bottom, 30)
         }
+        .scrollIndicators(.hidden)
+        .background(Obs.canvas)
         .onAppear { if day.isEmpty { day = days.first ?? today } }
         .sheet(isPresented: $showStart) { StartWorkoutSheet() }
         .sheet(isPresented: $showLog) { LogWorkoutSheet(day: day) }
@@ -920,4 +998,8 @@ struct ActivityTab<Header: View>: View {
         }
         .obsCard()
     }
+}
+
+extension ActivityTab: Equatable {
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.inputs == b.inputs }
 }

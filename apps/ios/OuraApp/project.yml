@@ -88,6 +88,7 @@ targets:
       - path: TrendsView.swift
       - path: SignalUI.swift
       - path: SkinTemperature.swift
+      - path: TabScreens.swift
       - path: BackgroundSync.swift
       - path: BLETransport.swift
       - path: RingSync.swift

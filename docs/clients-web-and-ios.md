@@ -190,9 +190,12 @@ client re-derives packet timing at all — tracked as a follow-up.
   midpoint), HRV balance (week vs 60-night ratio), recovery index (from the heart-rate
   curve) and the new sleep-regularity contributor. iOS only (Profile → Oura history).
 - **Signal (terminal) visual design**: iOS only. Near-black canvas, one mint-green accent,
-  VT323 pixel font for numbers and titles, Share Tech Mono labels, digital-rain hero card,
-  pixel-block bar charts, custom tab bar with a + log sheet (`SignalUI.swift`, `Theme.swift`).
-  The web dashboard keeps its own look; the owner of this fork uses only the iOS app.
+  VT323 pixel font for numbers and titles, Share Tech Mono labels, digital rain behind every
+  screen (`AppBackdrop`, one pre-drawn image slid by Core Animation), pixel-block bar charts,
+  week-paged day strips, custom tab bar with a + log sheet (`SignalUI.swift`, `Theme.swift`).
+  Each tab is its own equatable view (`TabScreens.swift`) so taps redraw only their screen;
+  charts scrub on sideways drags only. The web dashboard keeps its own look; the owner of
+  this fork uses only the iOS app.
 - **Readiness score** (`nights[].readiness`, `oura-summary/src/readiness.rs`): in the
   summary JSON for both clients, rendered only on iOS (Today rings, readiness card, Trends,
   All days). The web dashboard does not show it yet.

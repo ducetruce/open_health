@@ -138,11 +138,11 @@ enum TrendMetric: String, CaseIterable, Identifiable {
 
     private func ringDaily(in s: Summary) -> [DatedVital] {
         switch self {
-        case .readiness: return s.nightlySeries { $0.readiness?.score }
-        case .sleepScore: return s.nightlySeries { $0.mainSleepScore?.score }
+        case .readiness: return s.nightlySeries("readiness") { $0.readiness?.score }
+        case .sleepScore: return s.nightlySeries("sleepScore") { $0.mainSleepScore?.score }
         case .asleep:
             // Time asleep = time in bed × the share of it the hypnogram scored as sleep.
-            return s.nightlySeries { n in n.efficiency.map { n.durationS * $0 / 100 } }
+            return s.nightlySeries("asleep") { n in n.efficiency.map { n.durationS * $0 / 100 } }
         case .restingHR: return s.nightlySeries(\.rhr)
         case .hrv: return s.nightlySeries(\.hrv_ms)
         case .temperature:
@@ -210,6 +210,12 @@ struct TrendSummary {
         return f
     }()
 
+    /// The same summary, built once per data load, day, period and temperature unit.
+    static func cached(metric: TrendMetric, summary s: Summary, period: TrendPeriod) -> TrendSummary {
+        let key = "trend|\(metric)|\(period.rawValue)|\(ymd.string(from: Date()))|\(UnitSettings.shared.temperature)|\(s.imported_history.count)|\(s.activity_daily.count)"
+        return s.cached(key) { TrendSummary(metric: metric, summary: s, period: period) }
+    }
+
     init(metric: TrendMetric, summary s: Summary, period: TrendPeriod, today: Date = Date()) {
         self.metric = metric
         let all: [(date: Date, value: Double)] = metric.daily(in: s).compactMap { v in
@@ -267,6 +273,8 @@ struct TrendSummary {
 
 struct TrendsTab<Header: View>: View {
     let s: Summary
+    /// What decides a redraw; see `TabInputs`.
+    let inputs: TabInputs
     @ViewBuilder var header: () -> Header
     @AppStorage("trends.period") private var periodRaw = TrendPeriod.month.rawValue
     @State private var detail: TrendMetric?
@@ -285,7 +293,7 @@ struct TrendsTab<Header: View>: View {
                     .pickerStyle(.segmented)
 
                     let summaries = TrendMetric.allCases
-                        .map { TrendSummary(metric: $0, summary: s, period: period) }
+                        .map { TrendSummary.cached(metric: $0, summary: s, period: period) }
                     let shown = summaries.filter { $0.count > 0 }
                     if shown.isEmpty {
                         Text("No data in this period yet. Sync your ring, or choose a longer period.")
@@ -414,15 +422,6 @@ struct TrendCard: View {
 struct TrendChart: View {
     let summary: TrendSummary
     var height: CGFloat
-    /// The date under the finger while scrubbing.
-    @State private var scrubDate: Date?
-    @State private var lastTicked: Date?
-    private static let ticker = UISelectionFeedbackGenerator()
-
-    private var selectedBucket: TrendSummary.Bucket? {
-        guard let scrubDate else { return nil }
-        return summary.buckets.min { abs($0.start.timeIntervalSince(scrubDate)) < abs($1.start.timeIntervalSince(scrubDate)) }
-    }
 
     private func readout(_ b: TrendSummary.Bucket) -> String {
         let metric = summary.metric
@@ -456,22 +455,11 @@ struct TrendChart: View {
                     .foregroundStyle(Obs.ink.opacity(0.35))
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
-            if let b = selectedBucket {
-                RuleMark(x: .value("Date", b.start, unit: unit))
-                    .foregroundStyle(Obs.signal)
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                    .annotation(position: .top, spacing: 2,
-                                overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
-                        Text(readout(b))
-                            .font(Obs.mono(11)).foregroundStyle(Obs.onSignal)
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(Obs.signal, in: RoundedRectangle(cornerRadius: 3))
-                    }
-            }
         }
-        .chartXSelection(value: $scrubDate)
-        .onChange(of: selectedBucket?.start) { _, new in
-            if let new, new != lastTicked { lastTicked = new; Self.ticker.selectionChanged() }
+        // Scrubbing lives in its own overlay view with its own state, so moving the
+        // finger redraws only the line and label, never the marks.
+        .chartOverlay { proxy in
+            TrendScrub(proxy: proxy, buckets: summary.buckets, unit: unit, readout: readout)
         }
         .chartYScale(domain: .automatic(includesZero: metric == .steps || metric == .activeKcal))
         .chartXAxis {
@@ -512,7 +500,7 @@ struct TrendDetailView: View {
     }
 
     var body: some View {
-        let summary = TrendSummary(metric: metric, summary: s, period: period)
+        let summary = TrendSummary.cached(metric: metric, summary: s, period: period)
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -548,5 +536,76 @@ struct TrendDetailView: View {
     private func stat(_ v: Double?) -> String {
         guard let v else { return "–" }
         return metric.unit.isEmpty ? metric.format(v) : "\(metric.format(v)) \(metric.unit)"
+    }
+}
+
+extension TrendsTab: Equatable {
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.inputs == b.inputs }
+}
+
+/// The scrub line and readout over a trend chart. Follows a sideways drag only, so a
+/// drag up or down that starts on the chart still scrolls the page.
+private struct TrendScrub: View {
+    let proxy: ChartProxy
+    let buckets: [TrendSummary.Bucket]
+    let unit: Calendar.Component
+    let readout: (TrendSummary.Bucket) -> String
+    @State private var selected: Int?
+    @State private var direction: Axis?
+    private static let ticker = UISelectionFeedbackGenerator()
+    private let labelWidth: CGFloat = 170
+
+    /// Where a bucket's mark sits: the middle of its day, week or month.
+    private func center(_ b: TrendSummary.Bucket) -> Date {
+        let next = TrendSummary.calendar.date(byAdding: unit, value: 1, to: b.start) ?? b.start
+        return b.start.addingTimeInterval(next.timeIntervalSince(b.start) / 2)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let plot = proxy.plotFrame.map { geo[$0] } ?? CGRect(origin: .zero, size: geo.size)
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { g in
+                                if direction == nil {
+                                    direction = abs(g.translation.width) > abs(g.translation.height) ? .horizontal : .vertical
+                                }
+                                guard direction == .horizontal,
+                                      let date: Date = proxy.value(atX: g.location.x - plot.minX) else { return }
+                                let i = buckets.indices.min {
+                                    abs(center(buckets[$0]).timeIntervalSince(date)) < abs(center(buckets[$1]).timeIntervalSince(date))
+                                }
+                                if let i, i != selected {
+                                    selected = i
+                                    Self.ticker.selectionChanged()
+                                }
+                            }
+                            .onEnded { _ in
+                                direction = nil
+                                selected = nil
+                            }
+                    )
+                if let i = selected, buckets.indices.contains(i),
+                   let px = proxy.position(forX: center(buckets[i])) {
+                    let x = plot.minX + px
+                    Rectangle().fill(Obs.signal)
+                        .frame(width: 1, height: plot.height)
+                        .offset(x: x - 0.5, y: plot.minY)
+                        .allowsHitTesting(false)
+                    Text(readout(buckets[i]))
+                        .font(Obs.mono(11)).foregroundStyle(Obs.onSignal)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(Obs.signal, in: RoundedRectangle(cornerRadius: 3))
+                        .frame(width: labelWidth)
+                        .offset(x: min(max(x - labelWidth / 2, 0), max(0, geo.size.width - labelWidth)),
+                                y: plot.minY - 22)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
     }
 }

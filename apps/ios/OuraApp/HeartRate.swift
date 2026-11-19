@@ -221,6 +221,13 @@ private struct HourlyRangeChart: View {
     let bars: [HourlyHR.Bar]
     let window: HourlyWindow
     @Binding var selected: HourlyHR.Bar?
+    @State private var dragAxis: Axis?
+
+    private func select(at x: CGFloat, slotWidth: CGFloat, slots: [Double], byHour: [Double: HourlyHR.Bar]) {
+        let i = Int(x / max(slotWidth, 0.001))
+        guard slots.indices.contains(i) else { return }
+        selected = byHour[slots[i]]
+    }
 
     /// Slot start times: the newest hour anchors the right edge and the window runs
     /// backwards from it, one slot per hour whether or not it has beats.
@@ -294,12 +301,20 @@ private struct HourlyRangeChart: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .gesture(
+                // A tap or a sideways drag picks an hour; up and down drags scroll the page.
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { g in
-                            let i = Int(g.location.x / max(slotWidth, 0.001))
-                            guard slots.indices.contains(i) else { return }
-                            selected = byHour[slots[i]]
+                            if dragAxis == nil {
+                                guard hypot(g.translation.width, g.translation.height) >= 8 else { return }
+                                dragAxis = abs(g.translation.width) > abs(g.translation.height) ? .horizontal : .vertical
+                            }
+                            guard dragAxis == .horizontal else { return }
+                            select(at: g.location.x, slotWidth: slotWidth, slots: slots, byHour: byHour)
+                        }
+                        .onEnded { g in
+                            if dragAxis == nil { select(at: g.location.x, slotWidth: slotWidth, slots: slots, byHour: byHour) }
+                            dragAxis = nil
                         }
                 )
                 .accessibilityLabel("Hourly heart rate band, \(bars.count) hours with data")

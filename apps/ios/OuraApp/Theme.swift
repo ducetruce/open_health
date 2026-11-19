@@ -54,8 +54,9 @@ enum Obs {
     static var baseLow: Color { paper }
     static var trace: Color { rule }
 
+    /// The backdrop behind every screen and sheet: the canvas with the digital rain.
     static var canvas: some View {
-        paper.ignoresSafeArea()
+        AppBackdrop()
     }
 
     // Sleep stages are shades of the accent that differ in lightness, so they stay

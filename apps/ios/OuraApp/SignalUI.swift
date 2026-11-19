@@ -1,50 +1,118 @@
 import SwiftUI
 
-// Building blocks of the signal (terminal) look: digital rain behind hero cards,
+// Building blocks of the signal (terminal) look: digital rain behind every screen,
 // bar charts drawn as stacked pixel blocks, the tab bar with its + button, the
 // log sheet the + opens, and the small metric tiles.
 
-/// Faint columns of falling characters, drawn behind a hero card's content.
-/// The glyphs are drawn once into a texture twice the card's height, and the whole
-/// texture slides down on a slow loop, so the animation costs the GPU a transform
-/// per frame instead of re-drawing hundreds of characters. Holds still when the
-/// user has asked iOS to reduce motion.
-struct DigitalRain: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var fall = false
-    private static let glyphs = Array("ﾊ7ﾐ0ﾋｰ3ｳｼﾅ1ﾓﾆ9ｻﾜﾂ5ｵﾘ4ｱﾎﾃﾏｹﾒｴｶｷﾑﾕﾗｾﾈｽﾀﾇﾍ8ｦｲｸｺｿﾁﾄﾉﾌﾔﾖﾙﾚﾛﾝ2Z:")
-    private static let column: CGFloat = 16
-    private static let row: CGFloat = 16
-
+/// The app's backdrop: the near-black canvas with faint columns of falling
+/// characters behind every screen. The glyphs are drawn once, at launch, into one
+/// screen-sized image shared by every screen; Core Animation slides two copies of it
+/// down on a slow loop. That runs in the system's render server, so the rain costs
+/// the app nothing per frame and never redraws when a screen changes size or scrolls.
+/// Holds still when the user has asked iOS to reduce motion.
+struct AppBackdrop: View {
     var body: some View {
-        GeometryReader { geo in
-            // One period is a whole number of rows, so the loop joins seamlessly.
-            let rows = max(1, Int(ceil(geo.size.height / Self.row)))
-            let period = CGFloat(rows) * Self.row
-            Canvas { ctx, size in
-                let cols = Int(size.width / Self.column) + 1
+        ZStack {
+            Obs.paper
+            RainLayer()
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The falling-glyph layer behind `AppBackdrop`.
+struct RainLayer: UIViewRepresentable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeUIView(context: Context) -> RainView { RainView() }
+    func updateUIView(_ view: RainView, context: Context) { view.still = reduceMotion }
+
+    final class RainView: UIView {
+        /// Points fallen per second.
+        private static let speed: CGFloat = 9
+        private static let cell: CGFloat = 16
+        private static let glyphs = Array("ﾊ7ﾐ0ﾋｰ3ｳｼﾅ1ﾓﾆ9ｻﾜﾂ5ｵﾘ4ｱﾎﾃﾏｹﾒｴｶｷﾑﾕﾗｾﾈｽﾀﾇﾍ8ｦｲｸｺｿﾁﾄﾉﾌﾔﾖﾙﾚﾛﾝ2Z:")
+
+        /// One screen of glyphs, drawn once and shared by every screen.
+        private static let tile: UIImage = {
+            let screen = UIScreen.main.bounds.size
+            let side = max(screen.width, screen.height)
+            // Rows fill a whole number of cells so the loop joins seamlessly.
+            let cell = RainView.cell
+            let size = CGSize(width: ceil(side / cell) * cell, height: ceil(side / cell) * cell)
+            let format = UIGraphicsImageRendererFormat.default()
+            format.opaque = false
+            format.scale = min(2, UIScreen.main.scale)
+            let font = UIFont(name: "ShareTechMono-Regular", size: 12) ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+            let green = UIColor(Obs.signal)
+            let cols = Int(size.width / cell), rows = Int(size.height / cell)
+            return UIGraphicsImageRenderer(size: size, format: format).image { _ in
                 for c in 0..<cols {
-                    for r in 0..<(rows * 2) {
-                        let rr = r % rows
-                        let glyph = Self.glyphs[(c * 7 + rr * 13) % Self.glyphs.count]
-                        let fade = 0.03 + 0.07 * Double((rr + c * 3) % 5) / 4
-                        ctx.draw(Text(String(glyph)).font(Obs.mono(12)).foregroundColor(Obs.signal.opacity(fade)),
-                                 at: CGPoint(x: CGFloat(c) * Self.column + Self.column / 2,
-                                             y: CGFloat(r) * Self.row + Self.row / 2))
+                    for r in 0..<rows {
+                        let glyph = String(RainView.glyphs[(c * 7 + r * 13) % RainView.glyphs.count])
+                        let fade = 0.04 + 0.08 * CGFloat((r + c * 3) % 5) / 4
+                        let text = NSAttributedString(string: glyph, attributes: [
+                            .font: font, .foregroundColor: green.withAlphaComponent(fade)])
+                        let g = text.size()
+                        text.draw(at: CGPoint(x: CGFloat(c) * cell + (cell - g.width) / 2,
+                                              y: CGFloat(r) * cell + (cell - g.height) / 2))
                     }
                 }
             }
-            .frame(width: geo.size.width, height: period * 2)
-            .drawingGroup()
-            .offset(y: fall ? 0 : -period)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.linear(duration: Double(period) / 9).repeatForever(autoreverses: false)) { fall = true }
+        }()
+
+        private let strip = CALayer()
+        private let copies = [CALayer(), CALayer()]
+        var still = false { didSet { if still != oldValue { restart() } } }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            clipsToBounds = true
+            let image = Self.tile.cgImage
+            for copy in copies {
+                copy.contents = image
+                copy.contentsScale = Self.tile.scale
+                copy.contentsGravity = .topLeft
+                strip.addSublayer(copy)
             }
+            layer.addSublayer(strip)
         }
-        .clipped()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            let size = Self.tile.size
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            strip.frame = CGRect(x: 0, y: -size.height, width: size.width, height: size.height * 2)
+            copies[0].frame = CGRect(origin: .zero, size: size)
+            copies[1].frame = CGRect(origin: CGPoint(x: 0, y: size.height), size: size)
+            CATransaction.commit()
+            if strip.animation(forKey: "fall") == nil { restart() }
+        }
+
+        // Back from the background or another tab: Core Animation may have dropped it.
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { restart() }
+        }
+
+        private func restart() {
+            strip.removeAnimation(forKey: "fall")
+            guard !still, window != nil else { return }
+            let h = Self.tile.size.height
+            let fall = CABasicAnimation(keyPath: "transform.translation.y")
+            fall.fromValue = 0
+            fall.toValue = h
+            fall.duration = CFTimeInterval(h / Self.speed)
+            fall.repeatCount = .infinity
+            fall.isRemovedOnCompletion = false
+            strip.add(fall, forKey: "fall")
+        }
     }
 }
 
@@ -252,6 +320,7 @@ struct Scrubbable: ViewModifier {
     var leadingInset: CGFloat = 0
     var trailingInset: CGFloat = 0
     @State private var index: Int?
+    @State private var direction: Axis?
     private static let ticker = UISelectionFeedbackGenerator()
     private let labelWidth: CGFloat = 150
 
@@ -262,9 +331,15 @@ struct Scrubbable: ViewModifier {
                 ZStack(alignment: .topLeading) {
                     Color.clear
                         .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
+                        // Sideways drags scrub; a drag that starts up or down is left
+                        // to the page, so scrolling over a chart never catches.
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 8)
                                 .onChanged { g in
+                                    if direction == nil {
+                                        direction = abs(g.translation.width) > abs(g.translation.height) ? .horizontal : .vertical
+                                    }
+                                    guard direction == .horizontal else { return }
                                     let f = Double((g.location.x - leadingInset) / plotW)
                                     guard let i = nearest(to: f) else { return }
                                     if i != index {
@@ -272,7 +347,10 @@ struct Scrubbable: ViewModifier {
                                         Self.ticker.selectionChanged()
                                     }
                                 }
-                                .onEnded { _ in index = nil }
+                                .onEnded { _ in
+                                    direction = nil
+                                    index = nil
+                                }
                         )
                     if let i = index, points.indices.contains(i) {
                         let x = leadingInset + CGFloat(points[i].x) * plotW

@@ -348,6 +348,10 @@ final class SummaryIndex {
     var days: [String]?
     var profileCount = -1
     var nightByDay: [String: NightRow]?
+    /// Nightly series by name (`Summary.nightlySeries`), built once per summary.
+    var series: [AnyHashable: [DatedVital]] = [:]
+    /// Anything else derived from the summary (see `Summary.cached`).
+    var other: [AnyHashable: Any] = [:]
 }
 
 struct Summary: Codable {
@@ -494,7 +498,26 @@ extension Summary {
     }
 
     /// One value per wake-date (longest night wins), oldest first — feeds vital trend charts.
-    func nightlySeries(_ pick: (NightRow) -> Double?) -> [DatedVital] {
+    /// Built once per summary and kept, under `id`: screens ask for the same series
+    /// on every redraw, and each build scans and sorts every night.
+    func nightlySeries(_ id: AnyHashable, _ pick: (NightRow) -> Double?) -> [DatedVital] {
+        if let cached = index.series[id] { return cached }
+        let built = buildNightlySeries(pick)
+        index.series[id] = built
+        return built
+    }
+    /// A value derived from this summary, built once under `key` and kept until the
+    /// nights change. The key must name everything else the value depends on.
+    func cached<T>(_ key: AnyHashable, _ build: () -> T) -> T {
+        if let hit = index.other[key] as? T { return hit }
+        let built = build()
+        index.other[key] = built
+        return built
+    }
+    func nightlySeries(_ key: KeyPath<NightRow, Double?>) -> [DatedVital] {
+        nightlySeries(AnyHashable(key)) { $0[keyPath: key] }
+    }
+    private func buildNightlySeries(_ pick: (NightRow) -> Double?) -> [DatedVital] {
         var byDay: [String: (dur: Double, value: Double)] = [:]
         for night in nights {
             guard let value = pick(night), value.isFinite else { continue }
