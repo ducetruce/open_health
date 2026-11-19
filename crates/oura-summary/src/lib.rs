@@ -3128,6 +3128,25 @@ pub fn build_summary(
         .collect::<serde_json::Map<_, _>>()
         .into();
 
+    // Raw pulse-waveform recordings (`cva_raw_ppg_data`): how many and on which local
+    // days, so the app can say whether a cardiovascular-age reading has data to use.
+    let pulse_waveform = {
+        let mut days: std::collections::BTreeMap<String, usize> = Default::default();
+        let mut total = 0usize;
+        for (ds, tag, _, cu) in &events {
+            if name_of(*tag) != "cva_raw_ppg_data" || !is_dated(*ds, *cu) {
+                continue;
+            }
+            total += 1;
+            *days.entry(ymd_label(unix_s_at(*ds, *cu), tz)).or_default() += 1;
+        }
+        json!({
+            "events": total,
+            "days": days.len(),
+            "last_day": days.keys().next_back(),
+        })
+    };
+
     // Daytime stress and resilience (see `stress`): quality-gated beats outside the
     // nights, on Oura's scale, calibrated by an imported export when there is one.
     let stress_block = {
@@ -3462,6 +3481,7 @@ pub fn build_summary(
         // IllnessResult so one card renders either source.
         "symptoms": symptoms,
         "stress": stress_block,
+        "pulse_waveform": pulse_waveform,
         "illness": illness,
         "cardio": cva,
         "fitness": { "vo2max": (vo2max * 10.0).round() / 10.0 },

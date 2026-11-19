@@ -820,6 +820,18 @@ impl RingSession {
                 Err(error) => progress.on_progress(format!("spo2 setting failed: {error}"), 0, 0),
             }
         }
+        // Raw pulse-waveform bursts overnight (`cva_raw_ppg_data`, 0x81): the signal a
+        // cardiovascular-age reading needs. Off on a stock ring and after a key-only
+        // pairing, so ask for it on every sync (CAP_CVA_PPG_SAMPLER = 0x0d). A refusal
+        // doesn't fail the sync.
+        {
+            use oura_protocol::protocol::feature_mode;
+            const CVA_PPG_SAMPLER: u8 = 0x0d;
+            match client.set_feature_mode(CVA_PPG_SAMPLER, feature_mode::AUTOMATIC).await {
+                Ok(()) => progress.on_progress("pulse waveform on".into(), 0, 0),
+                Err(error) => progress.on_progress(format!("pulse waveform setting failed: {error}"), 0, 0),
+            }
+        }
         // Push the phone's clock to the ring so this boot logs a `time_sync` anchor.
         // Without one, a rebooted ring's nights have no bridge to wall-clock time:
         // `time_sync` is the only wall-clock anchor in the event stream, and it is

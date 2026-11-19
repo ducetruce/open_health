@@ -174,6 +174,8 @@ const HISTORY_COLUMNS: &[(&str, &str)] = &[
     ("Steps", "steps"),
     ("Activity Burn", "active_kcal"),
     ("Active Calories", "active_kcal"),
+    ("vascular_age", "vascular_age"),
+    ("pwv", "pwv"),
     ("stress_min", "stress_min"),
     ("restored_min", "restored_min"),
 ];
@@ -668,12 +670,16 @@ enum V2Kind {
     DailySpo2,
     DailyStress,
     DailyResilience,
+    DailyCardiovascularAge,
 }
 
 fn v2_kind(header: &[String]) -> Option<V2Kind> {
     let has = |c: &str| header.iter().any(|h| h == c);
     if !has("day") {
         return None;
+    }
+    if has("pulse_wave_velocity") && has("vascular_age") {
+        return Some(V2Kind::DailyCardiovascularAge);
     }
     if has("stress_high") && has("recovery_high") {
         return Some(V2Kind::DailyStress);
@@ -813,6 +819,10 @@ fn merge_v2(tables: &[(V2Kind, Vec<Row>)]) -> Vec<Row> {
                     put("Resilience Sleep Recovery", c["sleep_recovery"].as_f64());
                     put("Resilience Daytime Recovery", c["daytime_recovery"].as_f64());
                     put("Resilience Stress", c["stress"].as_f64());
+                }
+                V2Kind::DailyCardiovascularAge => {
+                    put("vascular_age", get(r, "vascular_age"));
+                    put("pwv", get(r, "pulse_wave_velocity"));
                 }
                 V2Kind::SleepPeriods => {}
             }
@@ -1140,6 +1150,20 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, daytime: &[Row], source: &
         }
         if !entry.is_empty() {
             history.insert(day, Value::Object(entry));
+        }
+    }
+    // Oura repeats its last cardiovascular reading while it has no new one; keep only
+    // days with a fresh measurement.
+    let mut last_pwv: Option<f64> = None;
+    for entry in history.values_mut() {
+        let Some(o) = entry.as_object_mut() else { continue };
+        if let Some(p) = o.get("pwv").and_then(Value::as_f64) {
+            if last_pwv == Some(p) {
+                o.remove("pwv");
+                o.remove("vascular_age");
+            } else {
+                last_pwv = Some(p);
+            }
         }
     }
     let first = history.keys().next().cloned();

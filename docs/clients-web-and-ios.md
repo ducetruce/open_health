@@ -183,6 +183,11 @@ client re-derives packet timing at all — tracked as a follow-up.
 
 ## Known gaps (iOS-only, not yet on the web)
 
+- **Oura cardiovascular history** (import of `dailycardiovascularage`, history keys
+  `vascular_age` / `pwv`, carried-forward repeats dropped) and **pulse-waveform status**
+  (summary `pulse_waveform`; the sync turns on `CVA_PPG_SAMPLER` 0x0d each time). Shown
+  in the iOS Vitals cardiovascular card only. No forward estimate: nightly HR/HRV did
+  not predict vascular age better than its mean on held-out data.
 - **Daytime stress and resilience** (`oura-summary/src/stress.rs`, summary key `stress`):
   15-minute windows of still, awake time from quality-gated daytime beats
   (`green_ibi_quality_event`), heart rate and RMSSD against a 30-day personal baseline,

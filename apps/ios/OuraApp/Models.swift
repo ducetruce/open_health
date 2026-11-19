@@ -206,6 +206,8 @@ struct WorkoutSession: Identifiable, Codable {
 }
 struct Cardio: Codable { var vascular_age: Double?; var chronological_age: Double?; var pwv_ms: Double?; var segments: Int? }
 struct Fitness: Codable { var vo2max: Double? }
+/// How much raw pulse-waveform data (for cardiovascular age) the ring has recorded.
+struct PulseWaveform: Codable { var events: Int?; var days: Int?; var last_day: String? }
 struct SleepDebtDay: Codable, Identifiable {
     var date: String
     var total_sleep_min: Double?
@@ -235,6 +237,8 @@ struct ImportedDay: Codable {
     /// and that day's resilience level.
     var stress_min: Double?; var restored_min: Double?
     var stress_summary: String?; var resilience_level: String?
+    /// Oura's cardiovascular reading that day (only days it measured afresh).
+    var vascular_age: Double?; var pwv: Double?
 }
 
 /// What an Oura export import covered.
@@ -391,6 +395,7 @@ struct Summary: Codable {
     var oura_import: OuraImportInfo?
     /// Daytime stress by day and resilience (see `Stress.swift`).
     var stress: StressBlock?
+    var pulse_waveform: PulseWaveform?
     var error: String?
     // `workouts`/`modelErrors` are filled on-device (not in the FFI JSON), so keep them
     // out of decoding.
@@ -398,7 +403,7 @@ struct Summary: Codable {
         case analysis_digest, analysis_version
         case digest, device, nights, clock, vitals, activity_profile, activity_daily, profile, cardio, fitness, error
         case symptoms
-        case imported_history, oura_import, stress
+        case imported_history, oura_import, stress, pulse_waveform
         case sleepDebt = "sleep_debt"
     }
     init() {}
@@ -425,6 +430,7 @@ struct Summary: Codable {
         imported_history = (try? c.decodeIfPresent([String: ImportedDay].self, forKey: .imported_history)) ?? [:]
         oura_import = try? c.decodeIfPresent(OuraImportInfo.self, forKey: .oura_import)
         stress = try? c.decodeIfPresent(StressBlock.self, forKey: .stress)
+        pulse_waveform = try? c.decodeIfPresent(PulseWaveform.self, forKey: .pulse_waveform)
         error = try? c.decodeIfPresent(String.self, forKey: .error)
     }
     /// Ring days plus days only known from an imported Oura export, newest first.

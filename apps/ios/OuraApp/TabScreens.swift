@@ -610,9 +610,12 @@ struct VitalsTab: View, Equatable, TabHelpers {
 
                 // Cardiovascular estimates belong together: vascular age/PWV
                 // from raw PPG plus the demographic VO₂max estimate.
-                if s.cardio?.vascular_age != nil || s.fitness?.vo2max != nil {
+                if s.cardio?.vascular_age != nil || s.fitness?.vo2max != nil || !OuraCardio.readings(s).isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         ObsTag("cardiovascular", icon: "heart.fill")
+                        if s.cardio?.vascular_age == nil {
+                            OuraCardioSection(s: s)
+                        }
                         if let cv = s.cardio, let va = cv.vascular_age {
                             ObsStat(label: "Vascular age", value: String(format: "%.1f yr", va))
                             if let ca = cv.chronological_age { ObsStat(label: "Vs your age", value: relAge(va - ca)) }
