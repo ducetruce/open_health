@@ -185,7 +185,11 @@ enum JSONValue: Codable {
     }
 }
 
-struct DailyStat: Codable { var active_kcal: Double?; var total_kcal: Double?; var steps: Double?; var distance_m: Double? }
+struct DailyStat: Codable {
+    var active_kcal: Double?; var total_kcal: Double?; var steps: Double?; var distance_m: Double?
+    /// Estimated steps in each local clock hour, 0–23.
+    var steps_hourly: [Double]? = nil
+}
 struct Profile: Codable { var sex: String?; var age: Double?; var height_m: Double?; var weight_kg: Double?; var ring_size: Double? }
 // an activity session: detected on-device by automatic_activity_detection (`source`
 // nil or "model"), started/logged by the wearer ("user"), or found by the model-free

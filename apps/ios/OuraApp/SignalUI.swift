@@ -63,6 +63,9 @@ struct PixelBars: View {
             let gap: CGFloat = 2
             let barW = (size.width - gap * CGFloat(values.count - 1)) / CGFloat(values.count)
             for (i, v) in values.enumerated() {
+                // With an explicit floor, a value at or below it (zero steps) draws
+                // nothing; otherwise every bar keeps a small stub.
+                if let floor, v <= floor { continue }
                 let frac = max(0.12, (v - lo) / span)
                 let h = size.height * CGFloat(frac)
                 let alpha = values.count > 1 ? 0.3 + 0.7 * Double(i) / Double(values.count - 1) : 1

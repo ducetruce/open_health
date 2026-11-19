@@ -3001,6 +3001,8 @@ pub fn build_summary(
     let mut prof_cnt: std::collections::BTreeMap<String, [u32; 96]> = Default::default();
     let mut daily: std::collections::BTreeMap<String, (f64, f64)> = Default::default();
     let mut met_min: std::collections::BTreeMap<i64, f64> = Default::default();
+    // Estimated steps per local clock hour, per day.
+    let mut steps_hourly: std::collections::BTreeMap<String, [f64; 24]> = Default::default();
     let weight = demo.weight_kg;
     // Resting daily expenditure via ecore's Schofield BMR (by age band + sex), instead
     // of the old flat `weight × 24` approximation. Added to active kcal for total kcal.
@@ -3047,6 +3049,8 @@ pub fn build_summary(
                     // there is one, else MET above rest × body weight.
                     let kcal = oura_export::active_kcal_rate(step_params, mv)
                         .unwrap_or_else(|| (mv - 1.0).max(0.0) * weight / 60.0);
+                    let hour = ((local - day_idx as f64 * 86400.0) / 3600.0).floor().clamp(0.0, 23.0) as usize;
+                    steps_hourly.entry(key.clone()).or_insert([0.0; 24])[hour] += step_rate;
                     let e = daily.entry(key).or_insert((0.0, 0.0));
                     e.0 += kcal;
                     e.1 += step_rate;
@@ -3091,6 +3095,9 @@ pub fn build_summary(
                     "active_kcal": act.round(),
                     "total_kcal": (bmr_kcal_day + act).round(),
                     "steps": steps_r,
+                    "steps_hourly": steps_hourly
+                        .get(k)
+                        .map(|h| h.iter().map(|v| v.round()).collect::<Vec<f64>>()),
                     "distance_m": distance_m,
                 }),
             )

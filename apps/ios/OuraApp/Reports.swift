@@ -1941,6 +1941,11 @@ struct ActivityReport: View {
             }
         }
 
+        if let hourly = st?.steps_hourly, hourly.count == 24, hourly.contains(where: { $0 > 0 }) {
+            Rule("steps by hour")
+            StepsByHour(hourly: hourly)
+        }
+
         Rule("movement across the day")
         MetProfile(timeline: s.wakingActivityTimeline(for: day))
 
@@ -1971,6 +1976,36 @@ struct ActivityReport: View {
 
 private func compactSteps(_ steps: Double?) -> (value: String, unit: String) {
     (Fmt.count(steps), "steps")
+}
+
+/// Each clock hour's estimated steps as pixel bars, scrubbable to the exact count, with
+/// the busiest hour called out.
+private struct StepsByHour: View {
+    let hourly: [Double]   // 24 values, 00:00–23:00
+
+    private func label(_ h: Int) -> String { String(format: "%02d:00", h) }
+
+    var body: some View {
+        let peak = hourly.indices.max { hourly[$0] < hourly[$1] } ?? 0
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Busiest hour").font(Obs.mono(11)).foregroundStyle(Obs.muted)
+                Text("\(label(peak))–\(label((peak + 1) % 24)) · \(Fmt.count(hourly[peak])) steps")
+                    .font(Obs.mono(12)).foregroundStyle(Obs.ink)
+            }
+            PixelBars(values: hourly, height: 110, floor: 0)
+                .scrubbable(hourly.indices.map { h in
+                    ScrubPoint(x: (Double(h) + 0.5) / 24,
+                               label: "\(label(h))–\(label((h + 1) % 24)) · \(Fmt.count(hourly[h])) steps")
+                })
+            HStack {
+                ForEach([0, 6, 12, 18, 24], id: \.self) { h in
+                    Text(label(h)).font(Obs.mono(10)).foregroundStyle(Obs.muted)
+                    if h != 24 { Spacer() }
+                }
+            }
+        }
+    }
 }
 
 // MET-above-rest across the human waking day, rather than a calendar-day 00–24
