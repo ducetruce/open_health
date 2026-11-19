@@ -1228,6 +1228,8 @@ struct RootView: View {
                     LiveWorkoutCard(active: active, onEnd: finishWorkout)
                 }
 
+                reviewLink(s)
+
                 todaySignals(s, night: night)
 
                 if let day = s.days.first {
@@ -1392,6 +1394,28 @@ struct RootView: View {
             SignalTile(name: "Blood O₂", index: "03",
                        value: f(spo2), unit: "%", series: spo2Series,
                        note: spo2.map { $0 >= 95 ? "Normal" : "Below 95%" } ?? "No reading yet") { tab = .vitals }
+        }
+    }
+
+    /// "2 detected workouts to review ›", linking to the review group on Activity.
+    @ViewBuilder private func reviewLink(_ s: Summary) -> some View {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()).map { WorkoutFormat.day.string(from: $0) } ?? ""
+        let count = s.allWorkouts.filter { $0.isAuto && $0.dayLabel >= cutoff }.count
+        if count > 0 {
+            Button { tab = .activity } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles").foregroundStyle(Obs.signal)
+                    Text(count == 1 ? "1 detected workout to review" : "\(count) detected workouts to review")
+                        .font(.system(size: 15, weight: .medium)).foregroundStyle(Obs.ink)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Obs.muted)
+                }
+                .padding(14)
+                .background(Obs.card, in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.signalDim, style: StrokeStyle(lineWidth: 1, dash: [5, 3])))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 

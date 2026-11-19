@@ -27,6 +27,21 @@ enum WorkoutKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+extension WorkoutKind {
+    /// The kind a detection's label most likely means ("walking" → .walking).
+    static func guess(from label: String) -> WorkoutKind {
+        let l = label.lowercased()
+        if let exact = WorkoutKind(rawValue: l) { return exact }
+        let keywords: [(String, WorkoutKind)] = [
+            ("run", .running), ("walk", .walking), ("hik", .hiking), ("cycl", .cycling), ("bik", .cycling),
+            ("strength", .strength), ("weight", .strength), ("hiit", .hiit), ("interval", .hiit),
+            ("yoga", .yoga), ("swim", .swimming), ("row", .rowing), ("ellip", .elliptical),
+            ("danc", .dance), ("sport", .sports),
+        ]
+        return keywords.first { l.contains($0.0) }?.1 ?? .other
+    }
+}
+
 /// A workout the wearer started and stopped, logged after the fact, or confirmed from
 /// a rule detection.
 struct UserWorkout: Codable, Identifiable, Equatable {

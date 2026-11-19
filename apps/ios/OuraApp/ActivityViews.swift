@@ -148,11 +148,21 @@ struct BlinkingCursor: View {
 struct WorkoutRow: View {
     let session: WorkoutSession
     var kcal: Double? = nil
+    /// How a workout of the wearer's own came to be (nil for the activity model's).
+    var origin: UserWorkout.Origin? = nil
 
+    /// Where the workout came from, so kept detections and logged ones read apart.
     private var badge: String? {
         if session.isAuto { return "Detected" }
-        if session.isUser { return nil }
-        return "Auto"
+        if session.isUser {
+            switch origin {
+            case .confirmed: return "Detected · kept"
+            case .live: return "Recorded"
+            case .logged: return "Logged"
+            case nil: return nil
+            }
+        }
+        return "Detected"
     }
 
     var body: some View {
@@ -189,6 +199,79 @@ struct WorkoutRow: View {
             Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Obs.muted)
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A detected workout awaiting review: the guessed type with a question mark, one tap
+/// to keep it as that type, a menu to keep it as another, and a dismiss button.
+struct DetectedWorkoutRow: View {
+    let session: WorkoutSession
+    var kcal: Double? = nil
+    var showDay = false
+    let onOpen: () -> Void
+    let onKeep: (WorkoutKind) -> Void
+    let onDismiss: () -> Void
+
+    private var guess: WorkoutKind { WorkoutKind.guess(from: session.label) }
+
+    private var when: String {
+        let time = "\(session.startHM)–\(session.end)"
+        guard showDay else { return time }
+        return "\(Fmt.day(session.dayLabel)) · \(time)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onOpen) {
+                HStack(spacing: 12) {
+                    Image(systemName: guess.symbol)
+                        .font(.system(size: 17, weight: .medium)).foregroundStyle(Obs.signal)
+                        .frame(width: 40, height: 40)
+                        .overlay(Circle().strokeBorder(Obs.signalDim, style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(guess.title)?").font(.system(size: 16, weight: .semibold)).foregroundStyle(Obs.ink)
+                        Text(when).font(Obs.mono(12)).foregroundStyle(Obs.muted)
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text("\(session.durationMin) min").font(Obs.mono(14)).foregroundStyle(Obs.ink)
+                        if let kcal, kcal > 0 {
+                            Text("\(Fmt.count(kcal)) kcal").font(Obs.mono(11)).foregroundStyle(Obs.muted)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows heart rate and details")
+
+            HStack(spacing: 8) {
+                Button { onKeep(guess) } label: {
+                    Label("Keep as \(guess.title)", systemImage: "checkmark")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(Obs.onSignal)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .background(Obs.signal, in: RoundedRectangle(cornerRadius: 4))
+                }
+                Menu {
+                    ForEach(WorkoutKind.allCases.filter { $0 != guess }) { kind in
+                        Button { onKeep(kind) } label: { Label(kind.title, systemImage: kind.symbol) }
+                    }
+                } label: {
+                    Text("Other type")
+                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Obs.signal)
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.signalDim, lineWidth: 1))
+                }
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).foregroundStyle(Obs.ink2)
+                        .frame(width: 40, height: 40)
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.rule, lineWidth: 1))
+                }
+                .accessibilityLabel("Not a workout")
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 
@@ -761,10 +844,49 @@ struct ActivityTab<Header: View>: View {
         .obsCard(padding: 20)
     }
 
+    /// Detections not yet kept or dismissed, from the past week, newest first.
+    private var toReview: [WorkoutSession] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()).map { WorkoutFormat.day.string(from: $0) } ?? ""
+        return s.allWorkouts.filter { $0.isAuto && $0.dayLabel >= cutoff }
+    }
+
+    @ViewBuilder private var detectedGroup: some View {
+        let pending = toReview
+        if !pending.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    ObsTag("Detected · tap to keep", icon: "sparkles")
+                    Spacer()
+                    Text("\(pending.count)").font(Obs.mono(12)).foregroundStyle(Obs.signal)
+                }
+                ForEach(pending) { w in
+                    DetectedWorkoutRow(
+                        session: w,
+                        kcal: s.detected(id: w.id)?.stats?.active_kcal,
+                        showDay: true,
+                        onOpen: { selected = w },
+                        onKeep: { kind in
+                            if let d = s.detected(id: w.id) {
+                                store.confirm(d, as: kind)
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            }
+                        },
+                        onDismiss: { store.delete(sessionID: w.id) })
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Obs.card, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.signalDim, style: StrokeStyle(lineWidth: 1, dash: [5, 3])))
+        }
+    }
+
     @ViewBuilder private var workouts: some View {
-        let ws = s.workoutsOn(day)
+        // Detections awaiting review sit in their own group above.
+        let ws = s.workoutsOn(day).filter { !$0.isAuto }
+        detectedGroup
         VStack(alignment: .leading, spacing: 12) {
-            ObsTag("workouts", icon: "figure.run")
+            ObsTag("Your workouts", icon: "figure.run")
             if ws.isEmpty {
                 Text(day == today ? "No workouts yet today. Start one above, or log one you've done."
                                   : "No workouts on this day.")
@@ -772,7 +894,8 @@ struct ActivityTab<Header: View>: View {
             } else {
                 ForEach(ws) { w in
                     Button { selected = w } label: {
-                        WorkoutRow(session: w, kcal: s.detected(id: w.id)?.stats?.active_kcal)
+                        WorkoutRow(session: w, kcal: s.detected(id: w.id)?.stats?.active_kcal,
+                                   origin: store.userWorkout(sessionID: w.id)?.origin)
                     }
                     .buttonStyle(.plain)
                     if w.id != ws.last?.id { Rectangle().fill(Obs.rule).frame(height: 1) }
