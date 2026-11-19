@@ -1604,6 +1604,16 @@ struct DayReportView: View {
     }
 }
 
+/// Seconds spent in one stage: counted from the full hypnogram (each epoch is an equal
+/// share of the time in bed), so it is exact to the minute; the rounded percentage is
+/// only the fallback when there is no hypnogram.
+func stageSeconds(_ n: NightRow, code: Int, pct: Double?) -> Double? {
+    if let stages = n.hypnogram, !stages.isEmpty {
+        return n.durationS * Double(stages.filter { $0 == code }.count) / Double(stages.count)
+    }
+    return pct.map { n.durationS * $0 / 100 }
+}
+
 struct SleepReport: View {
     let s: Summary
     let day: String
@@ -1691,7 +1701,7 @@ struct SleepReport: View {
                                 Rectangle().fill(Obs.stage(code)).frame(width: 10, height: 10)
                                 Text(name).font(Obs.mono(12)).foregroundStyle(Obs.ink2)
                             }
-                            Text(pct.map { Fmt.duration(seconds: n.durationS * $0 / 100) } ?? "–")
+                            Text(stageSeconds(n, code: code, pct: pct).map { Fmt.duration(seconds: $0) } ?? "–")
                                 .font(Obs.pixel(24)).foregroundStyle(Obs.ink)
                             Text(pct.map { "\(Int($0.rounded()))% of the night" } ?? " ")
                                 .font(Obs.mono(10)).foregroundStyle(Obs.muted)
