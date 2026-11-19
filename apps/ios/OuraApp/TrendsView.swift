@@ -179,7 +179,10 @@ struct TrendSummary {
     let count: Int
 
     /// Percent change of this period's average against the previous one.
+    /// Not for skin temperature: it is a change from baseline that sits around zero,
+    /// so a percentage of it would be meaningless.
     var changePct: Double? {
+        guard metric != .temperature else { return nil }
         guard let a = average, let p = previousAverage, p != 0 else { return nil }
         return (a - p) / abs(p) * 100
     }
