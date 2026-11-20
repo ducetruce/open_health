@@ -2603,11 +2603,61 @@ pub fn build_summary(
         .as_ref()
         .map(|v| v["params"].clone())
         .filter(|p| p["contributors"].as_object().is_some_and(|c| !c.is_empty()));
+    // Seed the baselines with an imported Oura export's nights before the ring's first,
+    // so a few weeks of ring data still compare each night with months of history
+    // (resting heart rate, HRV balance, sleep balance, timing and regularity).
+    // Temperature stays ring-only: the export holds deviations, not readings.
+    let imported_history = oura_import.as_ref().and_then(|v| v["history"].as_object());
+    // Heart rate and HRV seeds stay apart from `prior_main_rhr`/`prior_main_hrv`, which
+    // also baseline the sleep-norms score: that score must not change with an import.
+    let mut seed_rhr: Vec<(f64, f64)> = Vec::new();
+    let mut seed_hrv: Vec<(f64, f64)> = Vec::new();
+    if let Some(history) = imported_history {
+        let first_ring_end = nights
+            .iter()
+            .map(|n| unix_s_at(n.end_ds, n.captured_unix))
+            .fold(f64::INFINITY, f64::min);
+        let mut days: Vec<(&String, &Value)> = history.iter().collect();
+        days.sort_by(|a, b| a.0.cmp(b.0));
+        for (day, e) in days {
+            let (Some(y), Some(m), Some(d)) = (
+                day.get(0..4).and_then(|v| v.parse().ok()),
+                day.get(5..7).and_then(|v| v.parse().ok()),
+                day.get(8..10).and_then(|v| v.parse().ok()),
+            ) else {
+                continue;
+            };
+            // Oura files a night under the day you woke; call it 7:30 that morning.
+            let end = (days_from_civil(y, m, d) * 86_400 - offset_seconds(tz)) as f64 + 7.5 * 3600.0;
+            if end >= first_ring_end - 6.0 * 3600.0 {
+                continue;
+            }
+            let mut any = false;
+            let mut put = |v: Option<f64>, into: &mut Vec<(f64, f64)>| {
+                if let Some(v) = v.filter(|v| v.is_finite() && *v > 0.0) {
+                    into.push((end, v));
+                    any = true;
+                }
+            };
+            put(e["hrv_ms"].as_f64(), &mut seed_hrv);
+            put(e["rhr"].as_f64(), &mut seed_rhr);
+            put(e["avg_rhr"].as_f64(), &mut prior_main_avg_hr);
+            put(e["asleep_s"].as_f64(), &mut prior_main_asleep);
+            if let Some(h) = e["mid_hour"].as_f64() {
+                prior_main_mid_hours.push(h.rem_euclid(24.0));
+            }
+            if any {
+                prior_main_ends.push(end);
+            }
+        }
+    }
     // Calibrated readiness needs the day's activity, which is computed after the
     // nights: (index in nights_json, wake day, drivers, provisional) to finish later.
     let mut pending_readiness: Vec<(usize, i64, std::collections::HashMap<&'static str, f64>, bool)> =
         Vec::new();
     for nt in &nights {
+        // Readiness's HRV history: the imported export's nights, then the ring's.
+        let readiness_hrv: Vec<(f64, f64)> = seed_hrv.iter().chain(prior_main_hrv.iter()).copied().collect();
         let hyp = hyps.get(&(nt.start_ds, nt.captured_unix));
         let raw_stages: Vec<i64> = hyp
             .and_then(|h| h["stages"].as_array())
@@ -2838,9 +2888,9 @@ pub fn build_summary(
             readiness::estimate(&readiness::ReadinessInput {
                 sleep_score: night_json["sleep_score"]["score"].as_f64(),
                 lowest_hr: raw_lowest_hr,
-                baseline_lowest_hr: baseline(&prior_main_rhr),
+                baseline_lowest_hr: baseline(&[seed_rhr.as_slice(), &prior_main_rhr].concat()),
                 hrv_ms: raw_mean_hrv,
-                baseline_hrv_ms: baseline(&prior_main_hrv),
+                baseline_hrv_ms: baseline(&readiness_hrv),
                 skin_temp: night_temp,
                 baseline_skin_temp: baseline(&prior_main_temp),
                 recent_sleep_s: (sleep_window.len() > readiness::MIN_BASELINE_NIGHTS)
@@ -2910,7 +2960,7 @@ pub fn build_summary(
             let mut m = std::collections::HashMap::new();
             m.insert("Sleep Score", oura_sleep.unwrap_or(70.0));
             m.insert("Average HRV", hrv);
-            m.insert("trail14_Average HRV", trailing(&prior_main_hrv).unwrap_or(hrv));
+            m.insert("trail14_Average HRV", trailing(&readiness_hrv).unwrap_or(hrv));
             m.insert("Lowest Resting Heart Rate", raw_lowest_hr.unwrap_or(55.0));
             m.insert("Average Resting Heart Rate", avg_hr);
             m.insert("trail14_Average Resting Heart Rate", trailing(&prior_main_avg_hr).unwrap_or(avg_hr));
@@ -2919,13 +2969,13 @@ pub fn build_summary(
             m.insert("trail14_Total Sleep Duration", trailing(&prior_main_asleep).unwrap_or(total_sleep));
             // HRV balance: the past week (tonight included) over the past 60 nights.
             let earlier_hrv: Vec<f64> =
-                prior_main_hrv.iter().filter(|&&(end, _)| end <= start_unix).map(|&(_, v)| v).collect();
+                readiness_hrv.iter().filter(|&&(end, _)| end <= start_unix).map(|&(_, v)| v).collect();
             let hrv_ratio = if earlier_hrv.len() >= 20 {
                 let week: Vec<f64> = earlier_hrv[earlier_hrv.len().saturating_sub(6)..].iter().copied().chain([hrv]).collect();
                 let base = &earlier_hrv[earlier_hrv.len().saturating_sub(60)..];
                 mean(&week).zip(mean(base)).filter(|(_, b)| *b > 0.0).map(|(w, b)| w / b)
             } else {
-                trailing(&prior_main_hrv).filter(|b| *b > 0.0).map(|b| hrv / b)
+                trailing(&readiness_hrv).filter(|b| *b > 0.0).map(|b| hrv / b)
             };
             m.insert("hrv_ratio", hrv_ratio.unwrap_or(1.0));
             // Sleep regularity: spread of the past week's midpoints and tonight's distance.
@@ -3201,6 +3251,21 @@ pub fn build_summary(
                 mean(&measured).map(|above| (days_from_civil(y, m, d), 1.0 + above))
             })
             .collect();
+        // Days before the ring take Oura's own average MET from the export.
+        let mut met_by_day = met_by_day;
+        if let Some(history) = imported_history {
+            for (day, e) in history {
+                let (Some(y), Some(m), Some(d), Some(met)) = (
+                    day.get(0..4).and_then(|v| v.parse().ok()),
+                    day.get(5..7).and_then(|v| v.parse().ok()),
+                    day.get(8..10).and_then(|v| v.parse().ok()),
+                    e["avg_met"].as_f64(),
+                ) else {
+                    continue;
+                };
+                met_by_day.entry(days_from_civil(y, m, d)).or_insert(met);
+            }
+        }
         for (index, wake_day, mut m, provisional) in pending_readiness {
             let previous = met_by_day.get(&(wake_day - 1)).or_else(|| met_by_day.get(&wake_day)).copied().unwrap_or(1.4);
             let history: Vec<f64> = met_by_day.range(wake_day - 14..wake_day).map(|(_, v)| *v).collect();

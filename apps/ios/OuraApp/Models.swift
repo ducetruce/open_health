@@ -132,7 +132,9 @@ struct SleepScoreComponent: Codable, Identifiable {
         case "latency": return "Time to fall asleep"
         case "timing": return "Sleep timing"
         case "activity_balance": return "Activity balance"
-        default: return key
+        case "sleep_regularity": return "Sleep regularity"
+        // Never show a raw key: "some_new_part" reads "Some new part".
+        default: return Fmt.sentence(key.replacingOccurrences(of: "_", with: " "))
         }
     }
     var source: String? {
