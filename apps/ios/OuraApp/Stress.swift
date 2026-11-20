@@ -318,54 +318,85 @@ struct StressView: View {
     }
 }
 
-/// The day from 6 AM to midnight: a pixel-block bar per window, up for stress and
-/// down for recovery, around a zero line. Scrubbable.
+/// The part of the day with readings (at least 6 hours): a pixel-block bar per
+/// 15-minute window, up for stress and down for recovery, around a zero line.
+/// Zooming to the measured hours keeps each bar wide. Scrubbable.
 struct StressTimeline: View {
     let windows: [StressWindow]
     private let axisW: CGFloat = 34
-    private let slots = 72
 
-    private func slot(_ w: StressWindow) -> Int { (StressClock.minutesSinceMidnight(w.start) - 360) / 15 }
+    /// Minutes since midnight, with the small hours after midnight counted on the
+    /// same (4 AM to 4 AM) day.
+    private func minute(_ w: StressWindow) -> Int {
+        let m = StressClock.minutesSinceMidnight(w.start)
+        return m < 240 ? m + 1440 : m
+    }
+
+    /// First and last minute shown: whole hours around the readings, 6 hours at least,
+    /// inside 4 AM to 4 AM.
+    private var range: (start: Int, end: Int) {
+        let ms = windows.map(minute)
+        guard let lo = ms.min(), let hi = ms.max() else { return (360, 1440) }
+        var start = lo / 60 * 60
+        var end = (hi + 15 + 59) / 60 * 60
+        if end - start < 360 {
+            let pad = 360 - (end - start)
+            start -= pad / 2
+            end += pad - pad / 2
+        }
+        if start < 240 { end += 240 - start; start = 240 }
+        if end > 1680 { start -= end - 1680; end = 1680 }
+        return (max(240, start), end)
+    }
+
+    private func label(_ minute: Int) -> String {
+        Fmt.clock(hour: (minute / 60) % 24, minute: minute % 60)
+    }
 
     var body: some View {
+        let r = range
+        let slots = max(1, (r.end - r.start) / 15)
+        let slotOf = { (w: StressWindow) in (minute(w) - r.start) / 15 }
         VStack(spacing: 6) {
             Canvas { ctx, size in
                 let plotW = size.width - axisW
                 let mid = size.height / 2
                 ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: mid)); $0.addLine(to: CGPoint(x: plotW, y: mid)) },
                            with: .color(Obs.ink.opacity(0.45)), lineWidth: 1)
-                let gap: CGFloat = 1
+                let gap: CGFloat = slots > 48 ? 1 : 2
                 let barW = max(1, (plotW - gap * CGFloat(slots - 1)) / CGFloat(slots))
                 for w in windows {
-                    let i = slot(w)
+                    let i = slotOf(w)
                     guard (0..<slots).contains(i), let st = StressState(rawValue: w.state) else { continue }
-                    let h = max(3, CGFloat(abs(w.value)) / 100 * (mid - 4))
+                    let h = max(4, CGFloat(abs(w.value)) / 100 * (mid - 2))
                     let x = CGFloat(i) * (barW + gap)
                     var y: CGFloat = 0
                     while y < h {
-                        let block = min(3, h - y)
+                        let block = min(4, h - y)
                         let top = w.value >= 0 ? mid - y - block : mid + y
                         ctx.fill(Path(CGRect(x: x, y: top, width: barW, height: block)), with: .color(st.color))
                         y += 5
                     }
                 }
-                for (frac, label) in [(0.0, "Stress"), (0.5, "0"), (1.0, "Rest")] {
-                    ctx.draw(Text(label).font(Obs.mono(9)).foregroundColor(Obs.muted),
+                for (frac, text) in [(0.0, "Stress"), (0.5, "0"), (1.0, "Rest")] {
+                    ctx.draw(Text(text).font(Obs.mono(9)).foregroundColor(Obs.muted),
                              at: CGPoint(x: size.width, y: size.height * frac),
                              anchor: frac == 0 ? .topTrailing : frac == 1 ? .bottomTrailing : .trailing)
                 }
             }
-            .frame(height: 150)
+            .frame(height: 200)
             .scrubbable(windows.compactMap { w in
-                let i = slot(w)
+                let i = slotOf(w)
                 guard (0..<slots).contains(i) else { return nil }
                 return ScrubPoint(x: (Double(i) + 0.5) / Double(slots),
                                   label: "\(StressClock.label(w.start)) · \(w.state.capitalized)")
             }, trailingInset: axisW)
             HStack {
-                ForEach(["6 AM", "12 PM", "6 PM", "12 AM"], id: \.self) { t in
-                    Text(t).font(Obs.mono(10)).foregroundStyle(Obs.ink2)
-                    if t != "12 AM" { Spacer() }
+                let span = r.end - r.start
+                let marks = [r.start, r.start + span / 3 / 60 * 60, r.start + 2 * span / 3 / 60 * 60, r.end]
+                ForEach(Array(marks.enumerated()), id: \.offset) { i, m in
+                    Text(label(m)).font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                    if i < marks.count - 1 { Spacer() }
                 }
             }
             .padding(.trailing, axisW)
