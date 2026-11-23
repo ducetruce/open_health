@@ -2603,6 +2603,17 @@ pub fn build_summary(
         .as_ref()
         .map(|v| v["params"].clone())
         .filter(|p| p["contributors"].as_object().is_some_and(|c| !c.is_empty()));
+    // How much Oura's nightly temperature deviation varied (°C), to put the ring's raw
+    // nightly deviation on the same scale (see the temperature driver below).
+    let oura_temp_sd: Option<f64> = oura_import.as_ref().and_then(|v| v["history"].as_object()).and_then(|h| {
+        let mut days: Vec<(&String, f64)> =
+            h.iter().filter_map(|(d, e)| Some((d, e["temp_deviation"].as_f64()?))).collect();
+        days.sort_by(|a, b| a.0.cmp(b.0));
+        let recent: Vec<f64> = days.iter().rev().take(90).map(|(_, v)| *v).collect();
+        (recent.len() >= 20).then(|| oura_export::std_dev(&recent)).filter(|s| *s > 0.0)
+    });
+    // The ring's raw deviations so far (causal), for that scale.
+    let mut ring_temp_devs: Vec<f64> = Vec::new();
     // Seed the baselines with an imported Oura export's nights before the ring's first,
     // so a few weeks of ring data still compare each night with months of history
     // (resting heart rate, HRV balance, sleep balance, timing and regularity).
@@ -2641,7 +2652,6 @@ pub fn build_summary(
             };
             put(e["hrv_ms"].as_f64(), &mut seed_hrv);
             put(e["rhr"].as_f64(), &mut seed_rhr);
-            put(e["avg_rhr"].as_f64(), &mut prior_main_avg_hr);
             put(e["asleep_s"].as_f64(), &mut prior_main_asleep);
             if let Some(h) = e["mid_hour"].as_f64() {
                 prior_main_mid_hours.push(h.rem_euclid(24.0));
@@ -2953,8 +2963,22 @@ pub fn build_summary(
             let hrv = raw_mean_hrv.unwrap_or(60.0);
             let avg_hr = night_avg_hr.unwrap_or(58.0);
             let total_sleep = night_asleep.unwrap_or(27_000.0);
+            // The ring reads raw finger temperature night by night, which swings far
+            // more than Oura's smoothed deviation (±0.2 °C typical): scale the ring's
+            // deviation to Oura's spread so an ordinary night scores as one.
             let temp_deviation = match (night_temp, trailing(&prior_main_temp)) {
-                (Some(t), Some(usual)) => t - usual,
+                (Some(t), Some(usual)) => {
+                    let raw = t - usual;
+                    let scale = match oura_temp_sd {
+                        Some(oura) if ring_temp_devs.len() >= 5 => {
+                            let ring = oura_export::std_dev(&ring_temp_devs);
+                            if ring > 0.0 { (oura / ring).clamp(0.15, 1.0) } else { 1.0 }
+                        }
+                        _ => 1.0,
+                    };
+                    ring_temp_devs.push(raw);
+                    raw * scale
+                }
                 _ => 0.0,
             };
             let mut m = std::collections::HashMap::new();
@@ -2964,6 +2988,33 @@ pub fn build_summary(
             m.insert("Lowest Resting Heart Rate", raw_lowest_hr.unwrap_or(55.0));
             m.insert("Average Resting Heart Rate", avg_hr);
             m.insert("trail14_Average Resting Heart Rate", trailing(&prior_main_avg_hr).unwrap_or(avg_hr));
+            // Resting heart rate as changes from the wearer's own baseline: tonight's
+            // lowest against the previous 60 nights' (the export's nights first), the
+            // night's average against the ring's previous 14 (averages differ between
+            // devices, so only the ring's own nights compare).
+            let lowest_base: Vec<f64> = seed_rhr
+                .iter()
+                .chain(prior_main_rhr.iter())
+                .filter(|&&(end, _)| end <= start_unix)
+                .map(|&(_, v)| v)
+                .collect();
+            let lowest_base = &lowest_base[lowest_base.len().saturating_sub(60)..];
+            let rhr_d60 = match (raw_lowest_hr, lowest_base.len() >= 5) {
+                (Some(low), true) => low - lowest_base.iter().sum::<f64>() / lowest_base.len() as f64,
+                _ => 0.0,
+            };
+            let avg_base: Vec<f64> = prior_main_avg_hr
+                .iter()
+                .filter(|&&(end, _)| end <= start_unix)
+                .map(|&(_, v)| v)
+                .collect();
+            let avg_base = &avg_base[avg_base.len().saturating_sub(14)..];
+            let avghr_d14 = match (night_avg_hr, avg_base.len() >= 5) {
+                (Some(a), true) => a - avg_base.iter().sum::<f64>() / avg_base.len() as f64,
+                _ => 0.0,
+            };
+            m.insert("rhr_d60", rhr_d60);
+            m.insert("avghr_d14", avghr_d14);
             m.insert("Temperature Deviation (°C)", temp_deviation);
             m.insert("Total Sleep Duration", total_sleep);
             m.insert("trail14_Total Sleep Duration", trailing(&prior_main_asleep).unwrap_or(total_sleep));
@@ -3251,8 +3302,29 @@ pub fn build_summary(
                 mean(&measured).map(|above| (days_from_civil(y, m, d), 1.0 + above))
             })
             .collect();
-        // Days before the ring take Oura's own average MET from the export.
+        // The ring's average MET is worked out differently from Oura's: shift the ring's
+        // days so their median matches Oura's over its last 60 days, then let days
+        // before the ring take Oura's own values.
         let mut met_by_day = met_by_day;
+        let oura_met: Vec<f64> = imported_history
+            .map(|h| {
+                let mut v: Vec<(&String, f64)> = h.iter().filter_map(|(d, e)| Some((d, e["avg_met"].as_f64()?))).collect();
+                v.sort_by(|a, b| a.0.cmp(b.0));
+                v.iter().rev().take(60).map(|(_, m)| *m).collect()
+            })
+            .unwrap_or_default();
+        let ring_met: Vec<f64> = met_by_day.values().rev().take(30).copied().collect();
+        if oura_met.len() >= 10 && ring_met.len() >= 5 {
+            let med = |v: &[f64]| {
+                let mut s = v.to_vec();
+                s.sort_by(|a, b| a.total_cmp(b));
+                s[s.len() / 2]
+            };
+            let offset = med(&oura_met) - med(&ring_met);
+            for v in met_by_day.values_mut() {
+                *v += offset;
+            }
+        }
         if let Some(history) = imported_history {
             for (day, e) in history {
                 let (Some(y), Some(m), Some(d), Some(met)) = (

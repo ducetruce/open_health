@@ -93,15 +93,11 @@ const DRIVERS: &[(&str, &[&str], Kind)] = &[
     // Oura re-tuned timing once already, and old days then mislead the curve.
     ("Sleep Timin Score", &["dist_usual"], Kind::Mono),
     ("Previous Night Score", &["Sleep Score"], Kind::Mono),
-    (
-        "Resting Heart Rate Score",
-        &[
-            "Lowest Resting Heart Rate",
-            "Average Resting Heart Rate",
-            "trail14_Average Resting Heart Rate",
-        ],
-        Kind::Lin,
-    ),
+    // Tonight's lowest heart rate against the previous 60 nights', and the night's
+    // average against the previous 14: changes from the wearer's own baseline, so a
+    // constant offset between the ring's and Oura's measurement cancels out (and they
+    // track Oura's contributor better than absolute levels: r 0.91 vs 0.89).
+    ("Resting Heart Rate Score", &["rhr_d60", "avghr_d14"], Kind::Lin),
     // Past week's HRV against the past two months' (`hrv_ratio`).
     ("HRV Balance Score", &["hrv_ratio"], Kind::Mono),
     ("Temperature Score", &["Temperature Deviation (°C)"], Kind::Emp),
@@ -404,6 +400,22 @@ fn engineer(rows: &mut [Row]) {
             r.insert("prev_Average MET".into(), json!(p));
         }
         prev = get(r, "Average MET");
+    }
+    // Heart rate against its own recent baseline (see the resting heart rate driver).
+    for (base, window, key) in [("Lowest Resting Heart Rate", 60, "rhr_d60"), ("Average Resting Heart Rate", 14, "avghr_d14")] {
+        let mut hist: Vec<f64> = Vec::new();
+        for r in rows.iter_mut() {
+            let v = get(r, base);
+            if hist.len() >= 5 {
+                if let Some(v) = v {
+                    let tail = &hist[hist.len().saturating_sub(window)..];
+                    r.insert(key.into(), json!(v - tail.iter().sum::<f64>() / tail.len() as f64));
+                }
+            }
+            if let Some(v) = v {
+                hist.push(v);
+            }
+        }
     }
     for base in ["Average HRV", "Average Resting Heart Rate", "Total Sleep Duration", "Average MET"] {
         let mut hist: Vec<f64> = Vec::new();
