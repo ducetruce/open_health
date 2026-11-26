@@ -90,6 +90,11 @@ struct NightRow: Codable, Identifiable {
     var sleep_score: SleepScore? = nil
     /// How recovered this night left you, against your own recent nights.
     var readiness: SleepScore? = nil
+    /// A sleep under 3 hours: kept apart from the night, shown as a nap.
+    var nap: Bool? = nil
+    /// Minutes asleep (naps), and on a main night the day's total nap minutes.
+    var asleep_min: Double? = nil
+    var nap_min: Double? = nil
     /// The sleep score on Oura's scale, when an Oura export has been imported.
     var oura_sleep_score: SleepScore? = nil
     /// The headline sleep score: Oura-calibrated when available.
@@ -151,6 +156,8 @@ struct SleepScore: Codable {
     var basis: String?
     /// True while the personal baselines behind the score are still filling in.
     var provisional: Bool? = nil
+    /// Points that day's nap added (Oura-calibrated scores only).
+    var nap_boost: Double? = nil
 }
 
 /// Minimal JSON value, so a component's `detail` can be carried through and read
@@ -492,7 +499,7 @@ extension Summary {
         if index.nightByDay == nil {
             var byDay: [String: NightRow] = [:]
             for n in nights {
-                guard let w = wakeYmd(n) else { continue }
+                guard n.nap != true, let w = wakeYmd(n) else { continue }   // naps are shown apart
                 if let have = byDay[w], (have.in_bed_h ?? 0) > (n.in_bed_h ?? 0) { continue }  // ties: the later night wins, as before
                 byDay[w] = n
             }

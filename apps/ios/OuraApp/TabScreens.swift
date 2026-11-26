@@ -360,6 +360,11 @@ struct TodayTab: View, Equatable, TabHelpers {
                             Text("\(Fmt.clock(n.start)) → \(Fmt.clock(n.end))").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
                         }
                         if n.hasHypnogram { Hypnogram(stages: n.hypnogram!, height: 28) }
+                        if let napMin = n.nap_min, napMin >= 1 {
+                            let boost = n.readiness?.nap_boost
+                            Text("+ \(Fmt.duration(minutes: napMin)) nap\(boost.map { " · +\(Int($0)) readiness" } ?? "")")
+                                .font(Obs.mono(12)).foregroundStyle(Obs.signal)
+                        }
                     } else {
                         Text("No sleep recorded for this night.").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     }
@@ -523,6 +528,10 @@ struct ReadinessView: View {
                         Text(DayKeys.long(day).uppercased()).font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
                         if let r = night?.readiness {
                             SleepScoreCard(score: r)
+                            if let boost = r.nap_boost, let napMin = night?.nap_min {
+                                Text("Includes +\(Int(boost)) from \(Fmt.duration(minutes: napMin)) of napping that day.")
+                                    .font(Obs.mono(12)).foregroundStyle(Obs.signal)
+                            }
                             if r.provisional == true {
                                 Text("Provisional: readiness compares each night with your own recent nights, and settles after about two weeks of them.")
                                     .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
@@ -651,12 +660,20 @@ struct SleepTab: View, Equatable, TabHelpers {
                         .fixedSize(horizontal: false, vertical: true)
                         .obsCard()
                 }
+                ForEach(naps(s, day: key)) { nap in
+                    NapCard(nap: nap, main: s.night(forDay: key))
+                }
                 if let debt = s.sleepDebt {
                     SleepDebtCard(debt: debt) { actions.sleepDebt() }.obsCard()
                 }
             }
             .padding(.horizontal, 20)
         }
+    }
+
+    /// Naps that ended on the picked day, earliest first.
+    private func naps(_ s: Summary, day: String) -> [NightRow] {
+        Array(s.nights.filter { $0.nap == true && s.wakeYmd($0) == day }.reversed())
     }
 
     private func sleepHero(_ n: NightRow) -> some View {
@@ -866,5 +883,40 @@ struct RingSheet: View {
             })
         }
         .obsCard()
+    }
+}
+
+/// One nap: when, how long asleep, its stages, and what it added to that day's scores.
+struct NapCard: View {
+    let nap: NightRow
+    /// That day's main night, which carries the nap boost.
+    let main: NightRow?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ObsTag("Nap", icon: "sun.max")
+                Spacer()
+                Text("\(Fmt.clock(nap.start)) → \(Fmt.clock(nap.end))").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(Fmt.duration(minutes: nap.asleep_min ?? nap.durationS / 60)).font(Obs.pixel(28)).foregroundStyle(Obs.ink)
+                Text(nap.asleep_min == nil ? "IN BED" : "ASLEEP").font(Obs.label(10)).tracking(1.2).foregroundStyle(Obs.muted)
+            }
+            if nap.hasHypnogram { Hypnogram(stages: nap.hypnogram!, height: 18) }
+            let r = main?.readiness?.nap_boost, sl = main?.oura_sleep_score?.nap_boost
+            if r != nil || sl != nil {
+                Text([r.map { "+\(Int($0)) readiness" }, sl.map { "+\(Int($0)) sleep score" }].compactMap { $0 }.joined(separator: " · ")
+                     + " that day")
+                    .font(Obs.mono(12)).foregroundStyle(Obs.signal)
+            } else if (nap.asleep_min ?? 0) < 20 {
+                Text("Naps under 20 minutes don’t change your scores, as in Oura.")
+                    .font(Obs.mono(11)).foregroundStyle(Obs.muted)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Obs.card, in: RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.signalDim, style: StrokeStyle(lineWidth: 1, dash: [5, 3])))
     }
 }

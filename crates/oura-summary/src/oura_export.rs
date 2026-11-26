@@ -954,7 +954,74 @@ sleepmodel.csv and dailyactivity.csv from the export (or its trends CSV). Not us
             unrecognised.join("; ")
         ));
     }
-    calibrate_and_store(db, rows, &daytime, source)
+    let naps = fit_nap_boosts(&v2);
+    calibrate_and_store(db, rows, &daytime, naps, source)
+}
+
+/// Nap length bucket edges, minutes: [0,20) [20,40) [40,60) [60,90) [90,∞).
+pub const NAP_EDGES: [f64; 4] = [20.0, 40.0, 60.0, 90.0];
+/// Points a nap added to that day's readiness and sleep score, per bucket, from one
+/// wearer's 150 naps (Oura's `readiness_score_delta` / `sleep_score_delta`).
+pub const DEFAULT_NAP_READINESS: [f64; 5] = [0.0, 1.0, 4.0, 4.0, 2.0];
+pub const DEFAULT_NAP_SLEEP: [f64; 5] = [0.0, 2.0, 3.0, 5.5, 3.0];
+
+pub fn nap_bucket(minutes: f64) -> usize {
+    NAP_EDGES.iter().filter(|e| minutes >= **e).count()
+}
+
+/// The boost a nap of `minutes` adds to (readiness, sleep score): fitted from the
+/// export's naps when there is one, else the defaults.
+pub fn nap_boost(params: Option<&Value>, minutes: f64) -> (f64, f64) {
+    let b = nap_bucket(minutes);
+    let pick = |key: &str, d: &[f64; 5]| -> f64 {
+        params
+            .and_then(|p| p["naps"][key].as_array())
+            .and_then(|a| a.get(b))
+            .and_then(Value::as_f64)
+            .unwrap_or(d[b])
+    };
+    (pick("readiness", &DEFAULT_NAP_READINESS), pick("sleep", &DEFAULT_NAP_SLEEP))
+}
+
+/// Median points Oura added per nap-length bucket, from the sleep periods' naps
+/// (`type` sleep / late_nap) that recorded a change. `None` without enough naps.
+fn fit_nap_boosts(tables: &[(V2Kind, Vec<Row>)]) -> Option<Value> {
+    let mut readiness: Vec<Vec<f64>> = vec![Vec::new(); 5];
+    let mut sleep: Vec<Vec<f64>> = vec![Vec::new(); 5];
+    for (kind, rows) in tables {
+        if *kind != V2Kind::SleepPeriods {
+            continue;
+        }
+        for r in rows {
+            let t = r.get("type").and_then(Value::as_str).unwrap_or("");
+            if t != "sleep" && t != "late_nap" {
+                continue;
+            }
+            let Some(minutes) = get(r, "total_sleep_duration").map(|s| s / 60.0) else { continue };
+            let b = nap_bucket(minutes);
+            if let Some(d) = get(r, "readiness_score_delta") {
+                readiness[b].push(d);
+            }
+            if let Some(d) = get(r, "sleep_score_delta") {
+                sleep[b].push(d);
+            }
+        }
+    }
+    let total: usize = readiness.iter().map(Vec::len).sum();
+    if total < 10 {
+        return None;
+    }
+    let med = |v: &mut Vec<f64>, d: f64| -> f64 {
+        if v.len() < 3 {
+            return d;
+        }
+        v.sort_by(|a, b| a.total_cmp(b));
+        let n = v.len();
+        if n % 2 == 1 { v[n / 2] } else { (v[n / 2 - 1] + v[n / 2]) / 2.0 }
+    };
+    let r: Vec<f64> = (0..5).map(|i| med(&mut readiness[i], DEFAULT_NAP_READINESS[i])).collect();
+    let s: Vec<f64> = (0..5).map(|i| med(&mut sleep[i], DEFAULT_NAP_SLEEP[i])).collect();
+    Some(json!({ "edges": NAP_EDGES, "readiness": r, "sleep": s, "naps": total }))
 }
 
 /// Least-squares weights of a score over its contributor sub-scores, in percent,
@@ -1117,7 +1184,7 @@ fn fit_per_minute(rows: &[Row], column: &str) -> Option<Value> {
     }))
 }
 
-fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, daytime: &[Row], source: &str) -> Result<Value> {
+fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, daytime: &[Row], naps: Option<Value>, source: &str) -> Result<Value> {
     engineer(&mut rows);
     let stress = fit_stress(&rows, daytime);
     let steps = fit_steps(&rows);
@@ -1200,6 +1267,7 @@ fn calibrate_and_store(db: &Path, mut rows: Vec<Row>, daytime: &[Row], source: &
             "steps": steps,
             "active_kcal": active_kcal,
             "stress": stress,
+            "naps": naps,
         },
     });
     let out = path(db);

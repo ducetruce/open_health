@@ -3050,6 +3050,11 @@ pub fn build_summary(
             let history = prior_main_ends.iter().filter(|&&end| end <= start_unix).count();
             pending_readiness.push((nights_json.len(), wake_day, m, history < readiness::MATURE_NIGHTS));
         }
+        // Naps (under 3 h) are kept, marked, with their time asleep for the nap boost.
+        night_json["nap"] = json!(!is_main_sleep);
+        if asleep_s > 0 {
+            night_json["asleep_min"] = json!((asleep_s as f64 / 60.0).round());
+        }
         nights_json.push(night_json);
         if is_main_sleep {
             prior_main_ends.push(end_unix);
@@ -3346,6 +3351,32 @@ pub fn build_summary(
             let scored = oura_export::score(params, oura_export::READINESS, &m, provisional);
             if !scored.is_null() {
                 nights_json[nights_count - 1 - index]["readiness"] = scored;
+            }
+        }
+        // A nap raises that day's readiness and sleep score, as Oura's did: points per
+        // nap length, learned from the export's naps (see `oura_export::nap_boost`).
+        let mut nap_min: std::collections::HashMap<String, f64> = Default::default();
+        for n in nights_json.iter() {
+            if n["nap"] == json!(true) {
+                if let (Some(day), Some(m)) = (n["wake_ymd"].as_str(), n["asleep_min"].as_f64()) {
+                    *nap_min.entry(day.to_string()).or_default() += m;
+                }
+            }
+        }
+        for n in nights_json.iter_mut() {
+            if n["nap"] == json!(true) {
+                continue;
+            }
+            let Some(minutes) = n["wake_ymd"].as_str().and_then(|d| nap_min.get(d)).copied() else { continue };
+            let (r, s) = oura_export::nap_boost(Some(params), minutes);
+            n["nap_min"] = json!(minutes);
+            for (key, boost) in [("readiness", r), ("oura_sleep_score", s)] {
+                if boost > 0.0 {
+                    if let Some(score) = n[key]["score"].as_f64() {
+                        n[key]["score"] = json!((score + boost).round().min(100.0));
+                        n[key]["nap_boost"] = json!(boost);
+                    }
+                }
             }
         }
     }

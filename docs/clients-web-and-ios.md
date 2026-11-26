@@ -194,6 +194,10 @@ client re-derives packet timing at all — tracked as a follow-up.
   Trends (`BodyHealthSections`), ring details behind a header battery pill (`RingSheet`),
   and a sleep-regularity trend. The previous layout is kept on the `classic-layout`
   branch.
+- **Naps** (summary `nights[].nap`, `asleep_min`; main nights carry `nap_min` and a
+  `nap_boost` on readiness / Oura sleep score, points per nap length fitted from the
+  export's `sleepmodel` naps, `oura_export::nap_boost`). iOS only (Sleep tab nap cards,
+  Today, Readiness page).
 - **Daytime stress and resilience** (`oura-summary/src/stress.rs`, summary key `stress`):
   15-minute windows of still, awake time from quality-gated daytime beats
   (`green_ibi_quality_event`), heart rate and RMSSD against a 30-day personal baseline,
