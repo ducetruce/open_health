@@ -102,28 +102,36 @@ private func verdictLabel(_ day: StressDay) -> String {
 
 /// The day so far as a strip of 15-minute windows (6 AM to midnight), the day's
 /// verdict, stressed and restored time, and the resilience level.
+/// Which stress screen to open.
+enum StressSheetKind: String, Identifiable {
+    case stress, resilience
+    var id: String { rawValue }
+}
+
 struct StressCard: View {
     let block: StressBlock?
+    /// The day to show; nil shows the latest day with readings.
+    var day: String? = nil
     var onOpen: () -> Void
     var onResilience: () -> Void
 
     var body: some View {
-        let key = block?.dayKeys.first
-        let day = key.flatMap { block?.days[$0] }
+        let key = self.day ?? block?.dayKeys.first
+        let info = key.flatMap { block?.days[$0] }
         VStack(alignment: .leading, spacing: 12) {
             Button(action: onOpen) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         ObsTag("Daytime stress")
                         Spacer()
-                        if let day { SignalBadge(text: verdictLabel(day)) }
+                        if let info { SignalBadge(text: verdictLabel(info)) }
                         Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                     }
-                    if let day {
-                        if let key, key != Self.todayKey {
+                    if let info {
+                        if self.day == nil, let key, key != Self.todayKey {
                             Text("Latest · \(Fmt.day(key))").font(Obs.mono(11)).foregroundStyle(Obs.muted)
                         }
-                        DayStressStrip(windows: day.windows ?? [])
+                        DayStressStrip(windows: info.windows ?? [])
                         HStack {
                             ForEach(["6 AM", "12 PM", "6 PM", "12 AM"], id: \.self) { t in
                                 Text(t).font(Obs.mono(9)).foregroundStyle(Obs.muted)
@@ -131,9 +139,12 @@ struct StressCard: View {
                             }
                         }
                         HStack(spacing: 0) {
-                            minutes("Stressed", day.stressed_min, StressState.stressed.color)
-                            minutes("Restored", day.restored_min, StressState.restored.color)
+                            minutes("Stressed", info.stressed_min, StressState.stressed.color)
+                            minutes("Restored", info.restored_min, StressState.restored.color)
                         }
+                    } else if self.day != nil, block?.days.isEmpty == false {
+                        Text("No still, awake readings for this day.")
+                            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                     } else {
                         Text("Your daytime baseline is building. Stress shows up after a couple of days of wearing the ring while you sit still.")
                             .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
@@ -210,6 +221,8 @@ struct DayStressStrip: View {
 
 struct StressView: View {
     let s: Summary
+    /// The day to open on (the app's picked day); the screen's own strip can move on.
+    var initialDay: String? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var day = ""
     @State private var showResilience = false
@@ -252,6 +265,7 @@ struct StressView: View {
                 }
                 .scrollIndicators(.hidden)
             }
+            .onAppear { if day.isEmpty, let initialDay { day = initialDay } }
             .navigationTitle("Daytime stress")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }

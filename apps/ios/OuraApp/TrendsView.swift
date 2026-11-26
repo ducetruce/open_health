@@ -289,6 +289,7 @@ struct TrendsTab<Header: View>: View {
     let s: Summary
     /// What decides a redraw; see `TabInputs`.
     let inputs: TabInputs
+    let actions: AppActions
     @ViewBuilder var header: () -> Header
     @AppStorage("trends.period") private var periodRaw = TrendPeriod.month.rawValue
     @State private var detail: TrendMetric?
@@ -324,6 +325,21 @@ struct TrendsTab<Header: View>: View {
                                 .accessibilityAddTraits(.isButton)
                         }
                     }
+                    // Body and health measures (what the Vitals tab held), then every day.
+                    BodyHealthSections(s: s, actions: actions)
+                    Button(action: actions.allDays) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("EVERY DAY").font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                                Text("Ring days and your Oura history").font(Obs.mono(14)).foregroundStyle(Obs.ink)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(Obs.trace)
+                        }
+                        .obsCard()
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 20)
             }

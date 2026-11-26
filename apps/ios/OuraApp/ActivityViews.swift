@@ -848,10 +848,15 @@ struct ActivityTab<Header: View>: View {
     /// What decides a redraw; see `TabInputs`.
     let inputs: TabInputs
     let onEndWorkout: () -> Void
+    /// Pick a day for every daily screen ("" = today).
+    let selectDay: (String) -> Void
     /// The screen title; given the date being shown ("Thu, Nov 19") for its top line.
     @ViewBuilder var header: (String?) -> Header
     @ObservedObject private var store = WorkoutStore.shared
-    @State private var day: String = ""
+    /// The shared picked day.
+    private var day: String { DayKeys.resolve(inputs.day) }
+    @State private var showAdd = false
+    @State private var stressSheet: StressSheetKind?
     @State private var showStart = false
     @State private var showLog = false
     @State private var showGoals = false
@@ -870,38 +875,56 @@ struct ActivityTab<Header: View>: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                header(day.isEmpty ? nil : DayHeading.label(day))
-                if !day.isEmpty, let latest = days.first, day != latest {
-                    LatestLink(title: "Today") { withAnimation(.easeOut(duration: 0.2)) { day = latest } }
-                        .padding(.horizontal, 20)
+                header(DayKeys.long(day))
+                DateBar(s: s, picked: day, onSelect: selectDay) { d in
+                    s.activity_daily[d]?.steps.map { Fmt.count($0) }
                 }
                 VStack(alignment: .leading, spacing: 18) {
                     rings
-                    if let active = store.active {
+                    if day == DayKeys.today, let active = store.active {
                         LiveWorkoutCard(active: active, onEnd: onEndWorkout)
-                    } else {
-                        WorkoutActions(onStart: { showStart = true }, onLog: { showLog = true })
                     }
+                    StressCard(block: s.stress, day: day,
+                               onOpen: { stressSheet = .stress },
+                               onResilience: { stressSheet = .resilience })
                     workouts
                     VStack(alignment: .leading, spacing: 22) {
                         ActivityReport(s: s, day: day, showSessions: false)
                     }
                     .obsCard()
-                    // Day picker at the end of the page, inside the card margins, as on Today.
-                    DayStrip(days: days, selection: $day, title: "Days · steps") { d in
-                        s.activity_daily[d]?.steps.map { Fmt.count($0) }
-                    }
-                    .padding(.top, 8)
+                    HourlyHeartRateSection()
                 }
                 .padding(.horizontal, 20)
             }
-            .padding(.bottom, 30)
+            .padding(.bottom, 90)
         }
         .scrollIndicators(.hidden)
         .background(Obs.canvas)
-        .onAppear { if day.isEmpty { day = days.first ?? today } }
-        // A new day (after midnight or a sync) replaces whatever day was picked.
-        .onChange(of: days.first) { _, newest in if let newest { day = newest } }
+        // Start or log a workout: the + lives on the one tab where it applies.
+        .overlay(alignment: .bottomTrailing) {
+            Button { showAdd = true } label: {
+                Image(systemName: "plus").font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(Obs.onSignal)
+                    .frame(width: 52, height: 52)
+                    .background(Obs.signal, in: Circle())
+                    .shadow(color: Obs.signal.opacity(0.45), radius: 11)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 18).padding(.bottom, 14)
+            .accessibilityLabel("Add a workout")
+        }
+        .confirmationDialog("Add a workout", isPresented: $showAdd, titleVisibility: .hidden) {
+            Button(store.active == nil ? "Start a workout" : "Workout in progress") { showStart = true }
+                .disabled(store.active != nil)
+            Button("Log a past workout") { showLog = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(item: $stressSheet) { kind in
+            switch kind {
+            case .stress: StressView(s: s, initialDay: day)
+            case .resilience: ResilienceView(s: s)
+            }
+        }
         .sheet(isPresented: $showStart) { StartWorkoutSheet() }
         .sheet(isPresented: $showLog) { LogWorkoutSheet(day: day) }
         .sheet(isPresented: $showGoals) { GoalsSheet { goalsVersion += 1 } }

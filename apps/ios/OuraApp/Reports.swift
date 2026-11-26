@@ -1693,11 +1693,6 @@ struct SleepReport: View {
                 Rule(n.oura_sleep_score == nil ? "sleep score" : "sleep score · sleep norms")
                 SleepScoreCard(score: score, breathRate: n.oura_sleep_score == nil ? n.breath_rate : nil)
             }
-            // That morning's readiness and its contributors, for any night picked.
-            if let readiness = n.readiness {
-                Rule("readiness · \(Fmt.day(n.wake_ymd ?? day))")
-                SleepScoreCard(score: readiness)
-            }
 
             if n.hasHypnogram {
                 if !n.stagingComplete && n.hasHypnogram {

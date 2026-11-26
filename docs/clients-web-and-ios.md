@@ -188,6 +188,12 @@ client re-derives packet timing at all — tracked as a follow-up.
   (summary `pulse_waveform`; the sync turns on `CVA_PPG_SAMPLER` 0x0d each time). Shown
   in the iOS Vitals cardiovascular card only. No forward estimate: nightly HR/HRV did
   not predict vascular age better than its mean on held-out data.
+- **Four-tab day-first layout** (iOS, `TabScreens.swift`): Today · Sleep · Activity · Trends
+  with one picked day shared by the daily tabs (`DateBar`, back-to-today pill, re-tap a
+  tab), a Readiness page per day, stress on Activity, the Vitals measures folded into
+  Trends (`BodyHealthSections`), ring details behind a header battery pill (`RingSheet`),
+  and a sleep-regularity trend. The previous layout is kept on the `classic-layout`
+  branch.
 - **Daytime stress and resilience** (`oura-summary/src/stress.rs`, summary key `stress`):
   15-minute windows of still, awake time from quality-gated daytime beats
   (`green_ibi_quality_event`), heart rate and RMSSD against a 30-day personal baseline,

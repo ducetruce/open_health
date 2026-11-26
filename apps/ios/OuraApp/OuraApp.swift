@@ -882,7 +882,7 @@ struct RootView: View {
             switch args[index + 1] {
             case "sleep": tab = .sleep
             case "activity": tab = .activity
-            case "vitals": tab = .vitals
+            case "vitals": tab = .trends
             case "trends": tab = .trends
             default: tab = .today
             }
@@ -911,6 +911,9 @@ struct RootView: View {
     @State private var showLogWorkout = false
     @State private var showLogMenu = false
     @State private var pendingLog: LogChoice?
+    /// The day every daily screen shows (yyyy-MM-dd); "" follows today.
+    @State private var selectedDay = ""
+    @State private var showRing = false
     var body: some View {
         ZStack {
             // Each tab draws the backdrop (with the rain) itself; only the loading
@@ -945,6 +948,15 @@ struct RootView: View {
         .onChange(of: workouts.dismissed) { _, _ in remerge(stored) }
         .onAppear { if merged == nil, stored != nil { remerge(stored) } }
         .onAppear(perform: applyLaunchArguments)
+        .sheet(isPresented: $showRing) {
+            if let s = shown {
+                RingSheet(s: s) {
+                    // Close the ring sheet, then open sync once it has gone.
+                    showRing = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { showSync = true }
+                }
+            }
+        }
         .sheet(isPresented: $showSync) {
             SyncView(ring: ring, onSynced: refreshAfterSync, onReset: resetAndReload)
         }
@@ -1147,7 +1159,8 @@ struct RootView: View {
     private var unitsKey: String { "\(units.height)|\(units.weight)|\(units.temperature)|\(units.distance)" }
 
     private var tabInputs: TabInputs {
-        TabInputs(version: dataVersion, busyLabel: busyLabel, isBusy: ring.busy || isRefreshingSummary, units: unitsKey)
+        TabInputs(version: dataVersion, busyLabel: busyLabel, isBusy: ring.busy || isRefreshingSummary, units: unitsKey,
+                  day: selectedDay)
     }
 
     private var actions: AppActions {
@@ -1158,7 +1171,9 @@ struct RootView: View {
                    allDays: { showAllDays = true },
                    profile: { showProfile = true },
                    sync: { showSync = true },
-                   finishWorkout: finishWorkout)
+                   finishWorkout: finishWorkout,
+                   ring: { showRing = true },
+                   selectDay: { selectedDay = $0 })
     }
 
     /// Each tab is compared by `tabInputs` (`.equatable()`), so the app's own state
@@ -1171,24 +1186,27 @@ struct RootView: View {
                 .tabItem { Label("Today", systemImage: "house.fill") }.tag(AppTab.today).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
             SleepTab(s: s, inputs: inputs, actions: actions).equatable()
                 .tabItem { Label("Sleep", systemImage: "moon.fill") }.tag(AppTab.sleep).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
-            ActivityTab(s: s, inputs: inputs, onEndWorkout: finishWorkout) { date in
-                AppHeader(title: "Activity", subtitle: inputs.busyLabel ?? date) { HeaderButtons(actions: actions) }
+            ActivityTab(s: s, inputs: inputs, onEndWorkout: finishWorkout, selectDay: actions.selectDay) { date in
+                AppHeader(title: "Activity", subtitle: inputs.busyLabel ?? date) {
+                    HeaderButtons(actions: actions, battery: s.device?.battery_pct)
+                }
             }
             .equatable()
             .tabItem { Label("Activity", systemImage: "flame.fill") }.tag(AppTab.activity).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
-            TrendsTab(s: s, inputs: inputs) {
-                AppHeader(title: "Trends", subtitle: inputs.busyLabel) { HeaderButtons(actions: actions) }
+            TrendsTab(s: s, inputs: inputs, actions: actions) {
+                AppHeader(title: "Trends", subtitle: inputs.busyLabel ?? "Long term") {
+                    HeaderButtons(actions: actions, battery: s.device?.battery_pct)
+                }
             }
             .equatable()
             .tabItem { Label("Trends", systemImage: "chart.xyaxis.line") }.tag(AppTab.trends).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
-            VitalsTab(s: s, inputs: inputs, actions: actions).equatable()
-                .tabItem { Label("Vitals", systemImage: "heart.text.square.fill") }.tag(AppTab.vitals).toolbar(.hidden, for: .tabBar).safeAreaPadding(.bottom, SignalTabBar.height)
         }
         .tint(Obs.signal)
         // The bar floats over the pages; each page reserves its height (below), so the
         // end of every scrolling screen stops above it instead of underneath.
         .overlay(alignment: .bottom) {
-            SignalTabBar(tab: $tab) { showLogMenu = true }
+            // Tapping the tab you're on brings every screen back to today.
+            SignalTabBar(tab: $tab) { selectedDay = "" }
         }
     }
 
@@ -1212,7 +1230,7 @@ struct RootView: View {
     }
 }
 
-enum AppTab: Hashable { case today, sleep, activity, trends, vitals }
+enum AppTab: Hashable { case today, sleep, activity, trends }
 
 /// Which build is actually on this phone. A sideloaded app has no App Store version
 /// to compare against, and a failed install looks exactly like a successful one — so

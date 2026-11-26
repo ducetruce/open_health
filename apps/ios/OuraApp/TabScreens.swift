@@ -16,6 +16,10 @@ struct AppActions {
     var profile: () -> Void
     var sync: () -> Void
     var finishWorkout: () -> Void
+    /// The ring sheet (battery, sync, ring details).
+    var ring: () -> Void
+    /// Pick a day for every daily screen; "" follows today.
+    var selectDay: (String) -> Void
 }
 
 /// What decides whether a tab must redraw: the merged summary's version, the
@@ -25,18 +29,105 @@ struct TabInputs: Equatable {
     var busyLabel: String?
     var isBusy: Bool
     var units: String
+    /// The day picked for every daily screen (yyyy-MM-dd); "" follows today.
+    var day: String = ""
 }
 
-/// The profile and sync buttons at the right of every screen title.
+/// The ring's battery, profile and sync buttons at the right of every screen title.
 struct HeaderButtons: View {
     let actions: AppActions
+    var battery: Int? = nil
     var body: some View {
+        if let battery {
+            Button(action: actions.ring) {
+                HStack(spacing: 4) {
+                    BatteryGlyph(level: Double(battery) / 100)
+                    Text("\(battery)%").font(Obs.mono(11)).foregroundStyle(battery < 20 ? Obs.bad : Obs.ink2)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .overlay(Capsule().strokeBorder(Obs.rule, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Ring battery \(battery) percent")
+            .accessibilityHint("Opens your ring: battery, sync and details")
+        }
         Button(action: actions.profile) {
             Image(systemName: "person.crop.circle")
                 .font(.system(size: 22)).foregroundStyle(Obs.ink2)
         }
         .accessibilityLabel("Profile")
         SyncIndicatorButton(ring: RingSync.shared, action: actions.sync)
+    }
+}
+
+/// A small battery outline filled to `level` (0…1), amber when low.
+struct BatteryGlyph: View {
+    let level: Double
+    var body: some View {
+        HStack(spacing: 1) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2).strokeBorder(Obs.ink2, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(level < 0.2 ? Obs.bad : Obs.signal)
+                    .frame(width: max(1, 14 * min(1, max(0, level))))
+                    .padding(2)
+            }
+            .frame(width: 18, height: 9)
+            Rectangle().fill(Obs.ink2).frame(width: 2, height: 4)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The days the daily screens can show, newest first (today always included).
+enum DayKeys {
+    static var today: String { WorkoutFormat.day.string(from: Date()) }
+    static func all(_ s: Summary) -> [String] {
+        let t = today
+        return s.cached("dayKeys|\(t)") {
+            var d = s.days
+            if !d.contains(t) { d.append(t) }
+            return d.sorted(by: >)
+        }
+    }
+    /// The picked day, or today when none is picked.
+    static func resolve(_ picked: String) -> String { picked.isEmpty ? today : picked }
+    /// "Monday, Nov 23".
+    static func long(_ day: String) -> String {
+        WorkoutFormat.day.date(from: day).map { longFormat.string(from: $0) } ?? day
+    }
+    private static let longFormat: DateFormatter = {
+        let f = DateFormatter(); f.setLocalizedDateFormatFromTemplate("EEEEMMMMd"); return f
+    }()
+}
+
+/// The week strip every daily screen shares: picking a day here picks it for Today,
+/// Sleep and Activity together. Off today, a pill (or tapping the tab again) brings
+/// everything back to today.
+struct DateBar: View {
+    let s: Summary
+    let picked: String          // resolved day
+    let onSelect: (String) -> Void
+    var detail: (String) -> String? = { _ in nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            DayStrip(days: DayKeys.all(s),
+                     selection: Binding(get: { picked }, set: { onSelect($0 == DayKeys.today ? "" : $0) }),
+                     detail: detail)
+            if picked != DayKeys.today {
+                Button { withAnimation(.easeOut(duration: 0.2)) { onSelect("") } } label: {
+                    Text("↺ BACK TO TODAY").font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.onSignal)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Obs.signal, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back to today")
+            }
+        }
+        .padding(.horizontal, 18)
     }
 }
 
@@ -130,18 +221,15 @@ extension TabHelpers {
 
 // MARK: - Today
 
+/// Which day a sheet is about.
+struct DayRef: Identifiable { let day: String; var id: String { day } }
+
 struct TodayTab: View, Equatable, TabHelpers {
     let s: Summary
     let inputs: TabInputs
     let actions: AppActions
     @ObservedObject private var store = WorkoutStore.shared
-    @State private var readinessExpanded = CommandLine.arguments.contains("-expandReadiness")
-    @State private var stressSheet: StressSheet?
-
-    enum StressSheet: String, Identifiable {
-        case stress, resilience
-        var id: String { rawValue }
-    }
+    @State private var readinessFor: DayRef?
 
     nonisolated static func == (a: Self, b: Self) -> Bool { a.inputs == b.inputs }
 
@@ -150,74 +238,39 @@ struct TodayTab: View, Equatable, TabHelpers {
 
     var body: some View {
         TabPage { todayTab(s) }
-            .sheet(item: $stressSheet) { sheet in
-                switch sheet {
-                case .stress: StressView(s: s)
-                case .resilience: ResilienceView(s: s)
-                }
-            }
+            .sheet(item: $readinessFor) { ref in ReadinessView(s: s, day: ref.day) }
     }
-
-    private func toggleContributors() {
-        withAnimation(.easeOut(duration: 0.18)) { readinessExpanded.toggle() }
-    }
-
-    private static let headerDate: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "EEEE, MMM d"; return f
-    }()
-    private func todayHeader() -> String { Self.headerDate.string(from: Date()) }
-
-    // MARK: Today
 
     @ViewBuilder private func todayTab(_ s: Summary) -> some View {
-        AppHeader(title: "Today", subtitle: busyLabel ?? todayHeader()) { HeaderButtons(actions: actions) }
+        let key = DayKeys.resolve(inputs.day)
+        let isToday = key == DayKeys.today
+        AppHeader(title: "Today", subtitle: busyLabel ?? DayKeys.long(key)) {
+            HeaderButtons(actions: actions, battery: s.device?.battery_pct)
+        }
         if let err = s.error {
             ErrorCard(err: err, onConnect: actions.sync)
         } else {
-            let day = s.days.first ?? localDay()
-            let night = s.night(forDay: day) ?? s.nights.first
-            let st = s.activity_daily[localDay()] ?? s.activity_daily[day]
+            let night = s.night(forDay: key)
+            DateBar(s: s, picked: key, onSelect: actions.selectDay) { d in
+                (s.night(forDay: d)?.readiness?.score ?? s.imported_history[d]?.readiness).map { "\(Int($0))" }
+            }
             VStack(alignment: .leading, spacing: 14) {
-                readinessHero(s, night: night, st: st)
-
-                if let active = store.active {
+                readinessCard(s, night: night, day: key)
+                if isToday, let active = store.active {
                     LiveWorkoutCard(active: active, onEnd: actions.finishWorkout)
                 }
-
-                reviewLink(s)
-
-                todaySignals(s, night: night)
-
+                if isToday { reviewLink(s) }
+                lastNightCard(s, night: night, day: key, isToday: isToday)
+                todaySignals(s, night: night, isToday: isToday)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("DAYTIME · WHILE YOU SIT STILL").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
-                    Text("Stress").font(Obs.pixel(24)).foregroundStyle(Obs.ink)
+                    Text(isToday ? "SO FAR TODAY" : "THAT DAY").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+                    Text(isToday ? "Activity & stress" : DayKeys.long(key)).font(Obs.pixel(24)).foregroundStyle(Obs.ink)
                 }
                 .padding(.top, 16)
-                StressCard(block: s.stress,
-                           onOpen: { stressSheet = .stress },
-                           onResilience: { stressSheet = .resilience })
-
-                if let day = s.days.first {
-                    HStack(spacing: 9) {
-                        ObsTag(displayedDayLabel(day)).fixedSize()
-                        if displayedDayLabel(day) != day {
-                            Text(Fmt.day(day)).font(Obs.mono(11)).foregroundStyle(Obs.muted)
-                        }
-                        if isBusy {
-                            ProgressView().controlSize(.mini).tint(Obs.signal)
-                        }
-                    }
-                    .padding(.top, 10)
-                    TodayCard(s: s, day: day,
-                              onSleep: { actions.openReport(ReportSel(day: day, sleep: true)) },
-                              onActivity: { actions.openReport(ReportSel(day: day, sleep: false)) })
+                HStack(alignment: .top, spacing: 8) {
+                    activityMini(s, day: key)
+                    stressMini(s, day: key)
                 }
-
-                if let debt = s.sleepDebt {
-                    SleepDebtCard(debt: debt) { actions.sleepDebt() }.obsCard()
-                }
-
-                weekStrip(s)
             }
             .padding(.horizontal, 18)
         }
@@ -243,90 +296,138 @@ struct TodayTab: View, Equatable, TabHelpers {
         }
     }
 
-    /// The hero panel: the readiness ring, what it means, its contributors on demand,
-    /// and a footer linking to sleep, activity and sleep debt.
-    @ViewBuilder private func readinessHero(_ s: Summary, night: NightRow?, st: DailyStat?) -> some View {
+    /// Readiness for the picked day: the ring, what it means, and a way into every
+    /// contributor (the Readiness page).
+    @ViewBuilder private func readinessCard(_ s: Summary, night: NightRow?, day: String) -> some View {
         let readiness = night?.readiness
-        let goal = activityGoalProgress(st)
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                ObsTag("Readiness")
-                Spacer()
-                if readiness?.provisional == true {
-                    Text("PROVISIONAL").font(Obs.label(10)).tracking(1.6).foregroundStyle(Obs.signal)
+        Button { readinessFor = DayRef(day: day) } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    ObsTag("Readiness")
+                    Spacer()
+                    if readiness?.provisional == true {
+                        Text("PROVISIONAL").font(Obs.label(10)).tracking(1.6).foregroundStyle(Obs.signal)
+                    }
                 }
-            }
-            .padding(.horizontal, 18).padding(.top, 18)
-
-            HStack(alignment: .center, spacing: 16) {
-                Button { toggleContributors() } label: {
+                HStack(alignment: .center, spacing: 16) {
                     ScoreRing(value: readiness.map { "\(Int($0.score))" } ?? "–", caption: "readiness",
-                              progress: readiness.map { $0.score / 100 }, size: 128, lineWidth: 7, showCaption: false)
-                }
-                .buttonStyle(.plain)
-                VStack(alignment: .leading, spacing: 9) {
-                    if let r = readiness {
-                        SignalBadge(text: readinessBand(r.score))
-                        Text(readinessHeadline(r.score))
-                            .font(Obs.mono(19)).foregroundStyle(Obs.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(s.digest ?? readinessSummary(r))
-                            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button { toggleContributors() } label: {
-                            Text(readinessExpanded ? "HIDE CONTRIBUTORS" : "VIEW CONTRIBUTORS ›")
-                                .font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.ink)
-                                .padding(.vertical, 6).contentShape(Rectangle())
+                              progress: readiness.map { $0.score / 100 }, size: 112, lineWidth: 7, showCaption: false)
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let r = readiness {
+                            SignalBadge(text: readinessBand(r.score))
+                            Text(readinessHeadline(r.score))
+                                .font(Obs.mono(18)).foregroundStyle(Obs.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(day == DayKeys.today ? (s.digest ?? readinessSummary(r)) : readinessSummary(r))
+                                .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("CONTRIBUTORS ›").font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.ink)
+                        } else {
+                            Text(night == nil ? "No night recorded for this day. Wear your ring to bed, then sync in the morning."
+                                              : "Readiness appears after a few nights have been synced: it compares each night with your own baseline.")
+                                .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        Text(night == nil ? "Wear your ring to bed, then sync in the morning."
-                                          : "Readiness appears after a few nights have been synced: it compares each night with your own baseline.")
-                            .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .padding(18)
-
-            if readinessExpanded, let r = readiness {
-                VStack(alignment: .leading, spacing: 12) {
-                    SleepScoreCard(score: r, framed: false)
-                    if r.provisional == true {
-                        Text("Readiness compares each night with your own recent nights. It becomes settled after about two weeks of synced nights.")
-                            .font(Obs.mono(13)).foregroundStyle(Obs.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 18).padding(.bottom, 18)
-                .transition(.opacity)
-            }
-
-            HStack(spacing: 0) {
-                heroFooter("Sleep", night?.mainSleepScore.map { "\(Int($0.score))" }) { actions.go(.sleep) }
-                Rectangle().fill(Obs.rule).frame(width: 1)
-                heroFooter("Activity", goal.map { "\(Int(($0 * 100).rounded()))%" }) { actions.go(.activity) }
-                Rectangle().fill(Obs.rule).frame(width: 1)
-                heroFooter("Sleep debt", s.sleepDebt.map { Fmt.duration(minutes: $0.debt_min) }) { actions.sleepDebt() }
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .overlay(alignment: .top) { Rectangle().fill(Obs.rule).frame(height: 1) }
+            .obsCard()
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // The same panel as every other card: dark green fill, scanline grid, hairline border.
-        .background { RoundedRectangle(cornerRadius: 4).fill(Obs.card).overlay(Scanlines()) }
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Obs.rule, lineWidth: 1))
+        .buttonStyle(.plain)
+        .disabled(readiness == nil)
     }
 
-    private func heroFooter(_ label: String, _ value: String?, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label.uppercased()).font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
-                Text(value ?? "–").font(Obs.mono(15)).foregroundStyle(Obs.ink)
+    /// The night before the picked day: time asleep, bed and wake times, stages and
+    /// sleep score (opens Sleep), with the running sleep debt.
+    @ViewBuilder private func lastNightCard(_ s: Summary, night: NightRow?, day: String, isToday: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { actions.go(.sleep) } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        ObsTag(isToday ? "Last night" : "That night", icon: "moon.fill")
+                        Spacer()
+                        if let score = night?.mainSleepScore {
+                            Text("Sleep score \(Int(score.score))").font(Obs.mono(12)).foregroundStyle(Obs.ink)
+                        }
+                        Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
+                    }
+                    if let n = night {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(Fmt.duration(seconds: asleepSeconds(n) ?? n.durationS)).font(Obs.pixel(30)).foregroundStyle(Obs.ink)
+                            Text("ASLEEP").font(Obs.label(10)).tracking(1.2).foregroundStyle(Obs.muted)
+                            Spacer()
+                            Text("\(Fmt.clock(n.start)) → \(Fmt.clock(n.end))").font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                        }
+                        if n.hasHypnogram { Hypnogram(stages: n.hypnogram!, height: 28) }
+                    } else {
+                        Text("No sleep recorded for this night.").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
+                    }
+                }
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.vertical, 12)
+            .buttonStyle(.plain)
+            if isToday, let debt = s.sleepDebt {
+                Rectangle().fill(Obs.rule).frame(height: 1)
+                Button { actions.sleepDebt() } label: {
+                    HStack {
+                        Text("SLEEP DEBT").font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                        Spacer()
+                        Text(Fmt.duration(minutes: debt.debt_min)).font(Obs.mono(13)).foregroundStyle(Obs.ink)
+                        Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .obsCard()
+    }
+
+    /// Steps and active calories for the day, with progress toward the goals.
+    private func activityMini(_ s: Summary, day: String) -> some View {
+        let st = s.activity_daily[day]
+        let goal = activityGoalProgress(st) ?? 0
+        return Button { actions.go(.activity) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("ACTIVITY").font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
+                }
+                Text(Fmt.count(st?.steps)).font(Obs.pixel(28)).foregroundStyle(Obs.ink)
+                Text("steps · \(Fmt.count(st?.active_kcal)) kcal").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Obs.rule)
+                        Rectangle().fill(Obs.signal).frame(width: g.size.width * CGFloat(goal))
+                    }
+                }
+                .frame(height: 3)
+            }
+            .obsCard(padding: 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The day's stressed time and verdict.
+    private func stressMini(_ s: Summary, day: String) -> some View {
+        let d = s.stress?.days[day]
+        return Button { actions.go(.activity) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("STRESS").font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
+                }
+                Text(d.map { Fmt.duration(minutes: $0.stressed_min) } ?? "–").font(Obs.pixel(28))
+                    .foregroundStyle(d == nil ? Obs.ink : StressState.stressed.color)
+                Text(d.map { "stressed · \(($0.verdict ?? "measuring").capitalized)" } ?? "no still readings yet")
+                    .font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                DayStressStrip(windows: d?.windows ?? [], height: 6)
+            }
+            .obsCard(padding: 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -339,7 +440,7 @@ struct TodayTab: View, Equatable, TabHelpers {
 
     /// Resting heart rate, HRV and blood oxygen for the latest night, with the last
     /// two weeks as pixel bars.
-    @ViewBuilder private func todaySignals(_ s: Summary, night: NightRow?) -> some View {
+    @ViewBuilder private func todaySignals(_ s: Summary, night: NightRow?, isToday: Bool) -> some View {
         let recent = Array(s.nights.prefix(14).reversed())
         let rhrSeries = recent.compactMap(\.rhr)
         let hrvSeries = Array(s.vitals.hrv.series.suffix(14))
@@ -347,19 +448,19 @@ struct TodayTab: View, Equatable, TabHelpers {
         let spo2 = night?.spo2_mean ?? s.nights.first { $0.spo2_mean != nil }?.spo2_mean
         VStack(alignment: .leading, spacing: 6) {
             Text("OVERNIGHT · VS YOUR BASELINE").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
-            Text("Today’s signals").font(Obs.pixel(24)).foregroundStyle(Obs.ink)
+            Text(isToday ? "Today’s signals" : "That night’s signals").font(Obs.pixel(24)).foregroundStyle(Obs.ink)
         }
         .padding(.top, 16)
         HStack(spacing: 8) {
             SignalTile(name: "Resting HR", index: "01",
                        value: f(night?.rhr ?? s.vitals.rhr.latest), unit: "bpm", series: rhrSeries,
-                       note: s.vitals.rhr.delta_pct.map { abs($0) < 3 ? "At baseline" : String(format: "%+.0f%% vs base", $0) } ?? "Baseline building") { actions.go(.vitals) }
+                       note: s.vitals.rhr.delta_pct.map { abs($0) < 3 ? "At baseline" : String(format: "%+.0f%% vs base", $0) } ?? "Baseline building") { actions.vital(.heartRate) }
             SignalTile(name: "HRV", index: "02",
                        value: f(s.vitals.hrv.latest ?? night?.hrv_ms), unit: "ms", series: hrvSeries,
                        note: signedPercent(s.vitals.hrv.delta_pct) ?? "Baseline building") { actions.vital(.hrv) }
             SignalTile(name: "Blood O₂", index: "03",
                        value: f(spo2), unit: "%", series: spo2Series,
-                       note: spo2.map { $0 >= 95 ? "Normal" : "Below 95%" } ?? "No reading yet") { actions.go(.vitals) }
+                       note: spo2.map { $0 >= 95 ? "Normal" : "Below 95%" } ?? "No reading yet") { actions.vital(.oxygen) }
         }
     }
 
@@ -385,45 +486,6 @@ struct TodayTab: View, Equatable, TabHelpers {
         }
     }
 
-    /// The last seven days as buttons showing each day's readiness.
-    @ViewBuilder private func weekStrip(_ s: Summary) -> some View {
-        let days = Array(s.days.prefix(7).reversed())
-        if !days.isEmpty {
-            HStack {
-                Text("PAST 7 DAYS · READINESS").font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
-                Spacer()
-                Button { actions.allDays() } label: {
-                    Text("ALL \(s.days.count) DAYS ›").font(Obs.label(11)).tracking(1.4).foregroundStyle(Obs.signal)
-                        .padding(.vertical, 8).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 16)
-            HStack(spacing: 4) {
-                ForEach(days, id: \.self) { day in
-                    let last = day == days.last
-                    let score = s.night(forDay: day)?.readiness?.score ?? s.imported_history[day]?.readiness
-                    let date = WorkoutFormat.day.date(from: day)
-                    Button { actions.openReport(ReportSel(day: day, sleep: true)) } label: {
-                        VStack(spacing: 6) {
-                            Text(date.map { $0.formatted(.dateTime.weekday(.abbreviated)).uppercased() } ?? "")
-                                .font(Obs.label(10))
-                            Text(String(day.suffix(2))).font(Obs.pixel(18))
-                            Text(score.map { "\(Int($0))" } ?? "–").font(Obs.mono(11))
-                        }
-                        .foregroundStyle(last ? Obs.onSignal : Obs.ink2)
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
-                        .background(last ? Obs.signal : Color.clear, in: Capsule())
-                        .overlay(Capsule().strokeBorder(last ? Obs.signal : Obs.rule, lineWidth: 1))
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(Fmt.day(day)), readiness \(score.map { "\(Int($0))" } ?? "not available")")
-                }
-            }
-        }
-    }
-
     /// Average progress toward the daily calorie and step goals, 0…1 (capped).
     private func activityGoalProgress(_ st: DailyStat?) -> Double? {
         guard let st else { return nil }
@@ -440,11 +502,98 @@ struct TodayTab: View, Equatable, TabHelpers {
         return "Strongest: \(best.label) (\(Int(best.score))). Needs attention: \(worst.label) (\(Int(worst.score)))."
     }
 
-    /// HRV relative to its baseline, mapped so baseline sits at 75%.
-    private func hrvProgress(_ s: Summary) -> Double? {
-        guard let v = s.vitals.hrv.latest else { return nil }
-        guard let b = s.vitals.hrv.baseline, b > 0 else { return 0.75 }
-        return min(1, max(0.05, 0.75 * v / b))
+}
+
+// MARK: - Readiness page
+
+/// Readiness for one day: score, every contributor, the measurements behind them,
+/// and the two weeks around it.
+struct ReadinessView: View {
+    let s: Summary
+    let day: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let night = s.night(forDay: day)
+        NavigationStack {
+            ZStack {
+                Obs.canvas.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text(DayKeys.long(day).uppercased()).font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+                        if let r = night?.readiness {
+                            SleepScoreCard(score: r)
+                            if r.provisional == true {
+                                Text("Provisional: readiness compares each night with your own recent nights, and settles after about two weeks of them.")
+                                    .font(Obs.mono(12)).foregroundStyle(Obs.ink2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            inputs(night!)
+                        } else {
+                            Text("No readiness for this day.").font(Obs.mono(14)).foregroundStyle(Obs.ink2).obsCard()
+                        }
+                        history
+                    }
+                    .padding(20)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .navigationTitle("Readiness")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+
+    /// The measurements the contributors were scored from, beside your usual.
+    private func inputs(_ n: NightRow) -> some View {
+        let earlier = s.nights.filter { ($0.end_unix ?? 0) < (n.start_unix ?? 0) }.prefix(14)
+        let usual = { (pick: (NightRow) -> Double?) -> Double? in
+            let v = earlier.compactMap(pick)
+            return v.count >= 3 ? v.reduce(0, +) / Double(v.count) : nil
+        }
+        let temp = SkinTemp.nights(in: s).first { $0.date == day }?.deviation
+        let unit = UnitSettings.shared.temperature
+        return VStack(alignment: .leading, spacing: 10) {
+            ObsTag("What went in")
+            ObsStat(label: "Lowest heart rate", value: line(n.rhr, usual(\.rhr), "bpm"))
+            ObsStat(label: "Average HRV", value: line(n.hrv_ms, usual(\.hrv_ms), "ms"))
+            ObsStat(label: "Skin temperature", value: temp.map { "\(SkinTemp.signed($0, unit)) \(unit.symbol)" } ?? "–")
+            ObsStat(label: "Time asleep", value: Fmt.duration(seconds: asleepSeconds(n) ?? n.durationS))
+            ObsStat(label: "Sleep, nights before", value: {
+                let v = s.nights.drop(while: { $0.id != n.id }).prefix(14).compactMap { asleepSeconds($0) }
+                return v.isEmpty ? "–" : Fmt.duration(seconds: v.reduce(0, +) / Double(v.count)) + " avg"
+            }())
+        }
+        .obsCard()
+    }
+
+    private func line(_ value: Double?, _ usual: Double?, _ unit: String) -> String {
+        guard let value else { return "–" }
+        let now = "\(Int(value.rounded())) \(unit)"
+        return usual.map { now + " · usual \(Int($0.rounded()))" } ?? now
+    }
+
+    /// Readiness for the 14 days ending on this one.
+    @ViewBuilder private var history: some View {
+        let keys = DayKeys.all(s).filter { $0 <= day }.prefix(14).reversed()
+        let values: [(String, Double)] = keys.compactMap { d in
+            (s.night(forDay: d)?.readiness?.score ?? s.imported_history[d]?.readiness).map { (d, $0) }
+        }
+        if values.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                ObsTag("Last \(values.count) days")
+                PixelBars(values: values.map(\.1), height: 60, floor: 40)
+                    .scrubbable(values.enumerated().map { i, v in
+                        ScrubPoint(x: (Double(i) + 0.5) / Double(values.count), label: "\(Fmt.day(v.0)) · \(Int(v.1))")
+                    })
+                HStack {
+                    Text(Fmt.day(values.first?.0)).font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                    Spacer()
+                    Text(Fmt.day(values.last?.0)).font(Obs.mono(10)).foregroundStyle(Obs.ink2)
+                }
+            }
+            .obsCard()
+        }
     }
 }
 
@@ -454,7 +603,7 @@ struct SleepTab: View, Equatable, TabHelpers {
     let s: Summary
     let inputs: TabInputs
     let actions: AppActions
-    @State private var sleepDay = ""
+    @State private var readinessFor: DayRef?
 
     nonisolated static func == (a: Self, b: Self) -> Bool { a.inputs == b.inputs }
 
@@ -462,47 +611,49 @@ struct SleepTab: View, Equatable, TabHelpers {
 
     var body: some View {
         TabPage { sleepTab(s) }
-            // A newly synced night replaces whatever night was picked.
-            .onChange(of: s.days.first(where: { s.night(forDay: $0) != nil })) { _, _ in sleepDay = "" }
+            .sheet(item: $readinessFor) { ref in ReadinessView(s: s, day: ref.day) }
     }
 
     @ViewBuilder private func sleepTab(_ s: Summary) -> some View {
-        let nightDays = s.days.filter { s.night(forDay: $0) != nil }
-        let shownDay = nightDays.contains(sleepDay) ? sleepDay : nightDays.first
-        // The night on screen is named over the title, so a night picked in the strip
-        // below never reads as last night.
-        AppHeader(title: "Sleep", subtitle: busyLabel ?? shownDay.map { DayHeading.label($0) }) {
-            HeaderButtons(actions: actions)
-        }
-        if let shownDay, let latest = nightDays.first, shownDay != latest {
-            LatestLink(title: "Latest night") { withAnimation(.easeOut(duration: 0.2)) { sleepDay = latest } }
-                .padding(.horizontal, 20)
+        let key = DayKeys.resolve(inputs.day)
+        AppHeader(title: "Sleep", subtitle: busyLabel ?? DayKeys.long(key)) {
+            HeaderButtons(actions: actions, battery: s.device?.battery_pct)
         }
         if let err = s.error {
             ErrorCard(err: err, onConnect: actions.sync)
-        } else if nightDays.isEmpty {
-            Text("No nights yet. Wear your ring to bed, then sync in the morning.")
-                .font(Obs.mono(15)).foregroundStyle(Obs.ink2)
-                .obsCard().padding(.horizontal, 20)
         } else {
-            let day = nightDays.contains(sleepDay) ? sleepDay : nightDays[0]
+            DateBar(s: s, picked: key, onSelect: actions.selectDay) { d in
+                s.night(forDay: d)?.mainSleepScore.map { "\(Int($0.score))" }
+            }
             VStack(alignment: .leading, spacing: 18) {
-                if let n = s.night(forDay: day) {
+                if let n = s.night(forDay: key) {
                     sleepHero(n)
+                    if let r = n.readiness {
+                        Button { readinessFor = DayRef(day: key) } label: {
+                            HStack {
+                                Text("READINESS THAT MORNING").font(Obs.label(10)).tracking(1.4).foregroundStyle(Obs.muted)
+                                Spacer()
+                                Text("\(Int(r.score))").font(Obs.mono(15)).foregroundStyle(Obs.ink)
+                                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
+                            }
+                            .obsCard(padding: 14)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    VStack(alignment: .leading, spacing: 26) {
+                        SleepReport(s: s, day: key)
+                    }
+                    .padding(.top, 4)
+                } else {
+                    Text("No sleep recorded for the night ending \(DayKeys.long(key)).")
+                        .font(Obs.mono(14)).foregroundStyle(Obs.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .obsCard()
                 }
-                VStack(alignment: .leading, spacing: 26) {
-                    SleepReport(s: s, day: day)
-                }
-                .padding(.top, 4)
                 if let debt = s.sleepDebt {
                     SleepDebtCard(debt: debt) { actions.sleepDebt() }.obsCard()
                 }
-                // Night picker at the end of the page, inside the card margins, as on Today.
-                DayStrip(days: nightDays, selection: Binding(get: { day }, set: { sleepDay = $0 }),
-                         title: "Nights · sleep score") { d in
-                    s.night(forDay: d)?.mainSleepScore.map { "\(Int($0.score))" }
-                }
-                .padding(.top, 8)
             }
             .padding(.horizontal, 20)
         }
@@ -533,21 +684,15 @@ struct SleepTab: View, Equatable, TabHelpers {
 
 // MARK: - Vitals
 
-struct VitalsTab: View, Equatable, TabHelpers {
+/// The body and health measures (formerly the Vitals tab), shown at the end of
+/// Trends: nightly HRV, heart rate, skin temperature and blood oxygen, then the
+/// symptom radar and cardiovascular estimates.
+struct BodyHealthSections: View, TabHelpers {
     let s: Summary
-    let inputs: TabInputs
     let actions: AppActions
     @ObservedObject private var units = UnitSettings.shared
 
-    nonisolated static func == (a: Self, b: Self) -> Bool { a.inputs == b.inputs }
-
-    private var busyLabel: String? { inputs.busyLabel }
-
-    var body: some View { TabPage { vitalsTab(s) } }
-
-    // MARK: Vitals
-
-    @ViewBuilder private func vitalsTab(_ s: Summary) -> some View {
+    var body: some View {
         let latestTemp = s.nights.first { $0.skin_temp != nil }
         let latestOxygen = s.nights.first { $0.spo2_mean != nil }
         let tempUnit = units.temperature
@@ -555,11 +700,8 @@ struct VitalsTab: View, Equatable, TabHelpers {
             .map { Convert.temperature($0, tempUnit) }
         let recentOxygen = Array(s.nights.compactMap(\.spo2_mean).prefix(14).reversed())
         let latestHR = s.vitals.hr
-        AppHeader(title: "Vitals", subtitle: busyLabel) { HeaderButtons(actions: actions) }
-        if let err = s.error {
-            ErrorCard(err: err, onConnect: actions.sync)
-        } else {
-            VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 18) {
+            sectionTitle("Body", "Latest · vs your baseline")
                 VStack(alignment: .leading, spacing: 20) {
                     HStack(alignment: .top, spacing: 24) {
                         VitalCell(tag: "nightly hrv", value: f(s.vitals.hrv.latest), unit: "ms",
@@ -600,8 +742,7 @@ struct VitalsTab: View, Equatable, TabHelpers {
                 }
                 .obsCard()
 
-                HourlyHeartRateSection()
-
+            sectionTitle("Health", "Long term")
                 // Torch build: Oura's own illness model. Otherwise the shared
                 // core's baseline comparison over the same four biomarkers.
                 if let radar = s.symptomRadar, radar.available {
@@ -629,6 +770,33 @@ struct VitalsTab: View, Equatable, TabHelpers {
                     .obsCard()
                 }
 
+        }
+    }
+
+    private func sectionTitle(_ title: String, _ caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(caption.uppercased()).font(Obs.label(11)).tracking(1.8).foregroundStyle(Obs.muted)
+            Text(title).font(Obs.pixel(24)).foregroundStyle(Obs.ink)
+        }
+        .padding(.top, 10)
+    }
+}
+
+/// The ring: battery, last sync, serial and firmware, and any problems (ring clock
+/// warnings, on-device model errors), with the way into sync and diagnostics.
+/// Opened from the battery in every screen's header.
+struct RingSheet: View {
+    let s: Summary
+    let onSync: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Obs.canvas.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        deviceCard(s)
                 // nights the shared brain withheld because the ring clock could not
                 // be resolved unambiguously (missing anchor, accelerated counter, or
                 // multi-reboot stall)
@@ -656,9 +824,14 @@ struct VitalsTab: View, Equatable, TabHelpers {
                     .obsCard()
                 }
 
-                deviceCard(s)
+                    }
+                    .padding(20)
+                }
+                .scrollIndicators(.hidden)
             }
-            .padding(.horizontal, 20)
+            .navigationTitle("Your ring")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
     }
 
@@ -667,8 +840,8 @@ struct VitalsTab: View, Equatable, TabHelpers {
             HStack {
                 ObsTag("your ring", icon: "circle.circle")
                 Spacer()
-                Button { actions.sync() } label: {
-                    Text("Manage").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
+                Button(action: onSync) {
+                    Text("Sync & diagnostics ›").font(Obs.mono(13)).foregroundStyle(Obs.ink2)
                 }.buttonStyle(.plain)
             }
             ObsStat(label: "Battery",

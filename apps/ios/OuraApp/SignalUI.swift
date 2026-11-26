@@ -200,21 +200,21 @@ struct SignalTabBar: View {
     /// Height of the bar above the home indicator; pages reserve this much space.
     static let height: CGFloat = 72
     @Binding var tab: AppTab
-    var onPlus: () -> Void
+    /// Tapping the tab already showing (resets the picked day).
+    var onReselect: () -> Void
 
     private let items: [(AppTab, String, String)] = [
         (.today, "Today", "square.grid.2x2"),
         (.sleep, "Sleep", "moon"),
         (.activity, "Activity", "bolt"),
         (.trends, "Trends", "chart.xyaxis.line"),
-        (.vitals, "Vitals", "waveform.path.ecg"),
     ]
 
     var body: some View {
         HStack(alignment: .center, spacing: 0) {
             ForEach(items, id: \.0) { item in
                 let on = tab == item.0
-                Button { tab = item.0 } label: {
+                Button { if tab == item.0 { onReselect() } else { tab = item.0 } } label: {
                     VStack(spacing: 5) {
                         Image(systemName: item.2).font(.system(size: 19, weight: .regular))
                         Text(item.1).font(Obs.mono(10)).lineLimit(1)
@@ -227,16 +227,6 @@ struct SignalTabBar: View {
                 .accessibilityLabel(item.1)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
-            Button(action: onPlus) {
-                Image(systemName: "plus").font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(Obs.onSignal)
-                    .frame(width: 50, height: 50)
-                    .background(Obs.signal, in: Circle())
-                    .shadow(color: Obs.signal.opacity(0.45), radius: 11)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 6).padding(.trailing, 10)
-            .accessibilityLabel("Log a workout or sync")
         }
         .padding(.top, 8).padding(.bottom, 2)
         .background(Obs.paper.ignoresSafeArea(edges: .bottom))
