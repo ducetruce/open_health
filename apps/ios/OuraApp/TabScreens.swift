@@ -416,9 +416,12 @@ struct TodayTab: View, Equatable, TabHelpers {
         .buttonStyle(.plain)
     }
 
-    /// The day's stressed time and verdict.
+    /// The day's verdict, with stressed and restored time side by side.
     private func stressMini(_ s: Summary, day: String) -> some View {
         let d = s.stress?.days[day]
+        let verdict = d?.verdict
+        let tone: Color = verdict == "stressful" ? StressState.stressed.color
+            : verdict == "restored" ? StressState.restored.color : Obs.ink
         return Button { actions.go(.activity) } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -426,10 +429,18 @@ struct TodayTab: View, Equatable, TabHelpers {
                     Spacer()
                     Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Obs.trace)
                 }
-                Text(d.map { Fmt.duration(minutes: $0.stressed_min) } ?? "–").font(Obs.pixel(28))
-                    .foregroundStyle(d == nil ? Obs.ink : StressState.stressed.color)
-                Text(d.map { "stressed · \(($0.verdict ?? "measuring").capitalized)" } ?? "no still readings yet")
-                    .font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                Text(d == nil ? "–" : (verdict ?? "measuring").capitalized).font(Obs.pixel(28)).foregroundStyle(tone)
+                if let d {
+                    HStack(spacing: 6) {
+                        Text(Fmt.duration(minutes: d.stressed_min)).foregroundStyle(StressState.stressed.color)
+                        Text("stressed ·").foregroundStyle(Obs.ink2)
+                        Text(Fmt.duration(minutes: d.restored_min)).foregroundStyle(StressState.restored.color)
+                        Text("restored").foregroundStyle(Obs.ink2)
+                    }
+                    .font(Obs.mono(11)).lineLimit(1).minimumScaleFactor(0.7)
+                } else {
+                    Text("no still readings yet").font(Obs.mono(11)).foregroundStyle(Obs.ink2)
+                }
                 DayStressStrip(windows: d?.windows ?? [], height: 6)
             }
             .obsCard(padding: 12)

@@ -81,7 +81,6 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         switch self {
         case .readiness, .sleepScore, .asleep, .steps, .stress: return ""
         case .restingHR: return "bpm"
-        case .regularity: return "min"
         case .hrv: return "ms"
         case .temperature: return UnitSettings.shared.temperature.symbol
         case .oxygen: return "%"
@@ -94,7 +93,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     /// (skin temperature is judged by its distance from your usual, not its level).
     var higherIsBetter: Bool? {
         switch self {
-        case .restingHR, .breathing, .stress, .regularity: return false
+        case .restingHR, .breathing, .stress: return false
         case .temperature: return nil
         default: return true
         }
@@ -640,10 +639,11 @@ private struct TrendScrub: View {
     }
 }
 
-/// How regular your sleep timing is: for each night, the spread (standard deviation)
-/// of the sleep midpoint over that night and the six before it, in minutes. Lower is
-/// steadier; Oura's sleep-regularity contributor is built on the same idea. Nights
-/// come from the ring, and from an imported Oura export before it.
+/// How regular your sleep timing is, as a 0–100 score where higher is steadier. For
+/// each night, the spread (standard deviation) of the sleep midpoint over that night
+/// and the six before it becomes `100 · e^(−spread / 90 min)`: about 85 at a 15-minute
+/// spread, 72 at 30, 51 at an hour. Oura's sleep-regularity contributor is built on
+/// the same idea. Nights come from the ring, and from an imported Oura export before it.
 enum SleepRegularity {
     static func series(_ s: Summary) -> [DatedVital] {
         s.cached("sleepRegularity") {
@@ -668,7 +668,7 @@ enum SleepRegularity {
                 guard window.count >= 4 else { continue }
                 let mean = window.reduce(0, +) / Double(window.count)
                 let sd = (window.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(window.count)).squareRoot()
-                out.append(DatedVital(date: day, value: (sd * 60).rounded()))
+                out.append(DatedVital(date: day, value: (100 * exp(-sd * 60 / 90)).rounded()))
             }
             return out
         }
