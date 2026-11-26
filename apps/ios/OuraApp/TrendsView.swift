@@ -30,7 +30,7 @@ enum TrendPeriod: String, CaseIterable, Identifiable {
 
 /// How a metric's daily values are gathered and judged.
 enum TrendMetric: String, CaseIterable, Identifiable {
-    case readiness, sleepScore, asleep, restingHR, hrv, temperature, oxygen, breathing, stress, steps, activeKcal
+    case readiness, sleepScore, asleep, regularity, restingHR, hrv, temperature, oxygen, breathing, stress, steps, activeKcal
     var id: String { rawValue }
 
     var title: String {
@@ -38,6 +38,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .readiness: return "Readiness"
         case .sleepScore: return "Sleep score"
         case .asleep: return "Time asleep"
+        case .regularity: return "Sleep regularity"
         case .restingHR: return "Resting heart rate"
         case .hrv: return "Heart rate variability"
         case .temperature: return "Skin temperature"
@@ -54,6 +55,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .readiness: return "bolt.heart.fill"
         case .sleepScore: return "moon.stars.fill"
         case .asleep: return "bed.double.fill"
+        case .regularity: return "clock.arrow.circlepath"
         case .restingHR: return "heart.fill"
         case .hrv: return "waveform.path.ecg"
         case .temperature: return "thermometer.medium"
@@ -68,7 +70,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     var accent: Color {
         switch self {
         case .readiness: return Obs.readinessAccent
-        case .sleepScore, .asleep: return Obs.sleepAccent
+        case .sleepScore, .asleep, .regularity: return Obs.sleepAccent
         case .restingHR, .hrv: return Obs.heartAccent
         case .temperature, .oxygen, .breathing, .stress: return Obs.chart
         case .steps, .activeKcal: return Obs.activityAccent
@@ -79,6 +81,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         switch self {
         case .readiness, .sleepScore, .asleep, .steps, .stress: return ""
         case .restingHR: return "bpm"
+        case .regularity: return "min"
         case .hrv: return "ms"
         case .temperature: return UnitSettings.shared.temperature.symbol
         case .oxygen: return "%"
@@ -91,7 +94,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
     /// (skin temperature is judged by its distance from your usual, not its level).
     var higherIsBetter: Bool? {
         switch self {
-        case .restingHR, .breathing, .stress: return false
+        case .restingHR, .breathing, .stress, .regularity: return false
         case .temperature: return nil
         default: return true
         }
@@ -131,6 +134,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .hrv: return d.hrv_ms
         case .breathing: return d.breath_rate
         case .stress: return d.stress_summary == nil ? nil : d.stress_min
+        case .regularity: return nil   // built from midpoints across both sources, see ringDaily
         case .steps: return d.steps
         case .activeKcal: return d.active_kcal
         // Oura's export records skin temperature as a deviation (°C), the same measure
@@ -158,6 +162,7 @@ enum TrendMetric: String, CaseIterable, Identifiable {
         case .oxygen: return s.nightlySeries(\.spo2_mean)
         case .breathing: return s.nightlySeries(\.breath_rate)
         // Stressed minutes on days with enough still time for a verdict.
+        case .regularity: return SleepRegularity.series(s)
         case .stress: return s.cached("stressTrend") {
             (s.stress?.days ?? [:]).compactMap { day, d in d.verdict == nil ? nil : DatedVital(date: day, value: d.stressed_min) }
                 .sorted { $0.date < $1.date }
@@ -615,6 +620,41 @@ private struct TrendScrub: View {
                         .allowsHitTesting(false)
                 }
             }
+        }
+    }
+}
+
+/// How regular your sleep timing is: for each night, the spread (standard deviation)
+/// of the sleep midpoint over that night and the six before it, in minutes. Lower is
+/// steadier; Oura's sleep-regularity contributor is built on the same idea. Nights
+/// come from the ring, and from an imported Oura export before it.
+enum SleepRegularity {
+    static func series(_ s: Summary) -> [DatedVital] {
+        s.cached("sleepRegularity") {
+            var mids: [String: Double] = [:]
+            for (day, e) in s.imported_history { if let m = e.mid_hour { mids[day] = m } }
+            for day in s.days {
+                guard let n = s.night(forDay: day), let a = n.start_unix, let b = n.end_unix else { continue }
+                let mid = Date(timeIntervalSince1970: TimeInterval(a + b) / 2)
+                let c = Calendar.current.dateComponents([.hour, .minute], from: mid)
+                let h = Double(c.hour ?? 0) + Double(c.minute ?? 0) / 60
+                mids[day] = h < 12 ? h + 24 : h   // small hours after midnight count past 24
+            }
+            let days = mids.keys.sorted()
+            var out: [DatedVital] = []
+            for (i, day) in days.enumerated() {
+                guard let date = WorkoutFormat.day.date(from: day) else { continue }
+                // The nights within the 7 days ending on this one.
+                let window = days[max(0, i - 6)...i].filter { d in
+                    guard let dd = WorkoutFormat.day.date(from: d) else { return false }
+                    return date.timeIntervalSince(dd) < 7 * 86_400
+                }.compactMap { mids[$0] }
+                guard window.count >= 4 else { continue }
+                let mean = window.reduce(0, +) / Double(window.count)
+                let sd = (window.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(window.count)).squareRoot()
+                out.append(DatedVital(date: day, value: (sd * 60).rounded()))
+            }
+            return out
         }
     }
 }

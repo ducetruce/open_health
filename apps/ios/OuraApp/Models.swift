@@ -241,6 +241,8 @@ struct ImportedDay: Codable {
     var stress_summary: String?; var resilience_level: String?
     /// Oura's cardiovascular reading that day (only days it measured afresh).
     var vascular_age: Double?; var pwv: Double?
+    /// Sleep midpoint in hours, small hours past 24 (03:00 → 27.0).
+    var mid_hour: Double?
 }
 
 /// What an Oura export import covered.
