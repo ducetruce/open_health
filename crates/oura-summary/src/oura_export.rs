@@ -1714,3 +1714,85 @@ c;\"{\"\"daytime_recovery\"\": 33.5, \"\"sleep_recovery\"\": 57.8, \"\"stress\"\
         assert!(import(&db, "").is_err());
     }
 }
+
+// ── Back-test ────────────────────────────────────────────────────────────────
+
+/// How closely the calibrated readiness reproduces Oura's own, on the export itself:
+/// each contributor from its drivers against Oura's contributor, the combiner on
+/// Oura's own contributors, and the whole chain against Oura's score, over the most
+/// recent `days` with a readiness score. In-sample: the curves were fitted on the
+/// same export, so this is the best case for the formula; the ring's own
+/// measurements add their own error on top.
+pub fn backtest_readiness(files: &[(String, String)], days: usize) -> Result<Value> {
+    let mut v2: Vec<(V2Kind, Vec<Row>)> = Vec::new();
+    for (_, text) in files {
+        let table = parse_csv(text);
+        if let Some(kind) = table.first().and_then(|h| v2_kind(h)) {
+            v2.push((kind, table_rows(&table)));
+        }
+    }
+    let mut rows = merge_v2(&v2);
+    engineer(&mut rows);
+    let list = WEIGHTS.iter().find(|(n, _)| *n == READINESS).map(|(_, l)| *l).unwrap_or(&[]);
+    let weights: Map<String, Value> = fitted_weights(&rows, READINESS, list).unwrap_or_else(|| {
+        list.iter().filter(|(_, w)| *w > 0.0).map(|(c, w)| ((*c).to_string(), json!(w))).collect()
+    });
+    let mut contributors = Map::new();
+    for (contributor, drivers, kind) in DRIVERS {
+        if let Some((spec, _)) = fit_contributor(&rows, contributor, drivers, *kind) {
+            contributors.insert((*contributor).to_string(), spec);
+        }
+    }
+    let params = json!({ "weights": { READINESS: weights }, "contributors": contributors });
+    let scored: Vec<&Row> = rows.iter().filter(|r| get(r, READINESS).is_some()).collect();
+    let recent = &scored[scored.len().saturating_sub(days)..];
+
+    let stats = |pairs: &[(f64, f64)]| -> Value {
+        if pairs.is_empty() {
+            return Value::Null;
+        }
+        let n = pairs.len() as f64;
+        let mae = pairs.iter().map(|(p, a)| (p - a).abs()).sum::<f64>() / n;
+        let bias = pairs.iter().map(|(p, a)| p - a).sum::<f64>() / n;
+        let within3 = pairs.iter().filter(|(p, a)| (p - a).abs() <= 3.0).count() as f64 / n;
+        json!({ "n": pairs.len(), "mae": (mae * 10.0).round() / 10.0, "bias": (bias * 10.0).round() / 10.0,
+                "within_3": (within3 * 100.0).round() })
+    };
+    let metrics_of = |r: &Row| -> HashMap<&'static str, f64> {
+        let mut m = HashMap::new();
+        for (_, drivers, _) in DRIVERS {
+            for d in *drivers {
+                if let Some(v) = get(r, d) {
+                    m.insert(*d, v);
+                }
+            }
+        }
+        m
+    };
+    let mut per = Map::new();
+    for (c, _) in list.iter().filter(|(_, w)| *w > 0.0) {
+        let pairs: Vec<(f64, f64)> = recent
+            .iter()
+            .filter_map(|r| Some((sub_score(params["contributors"].get(*c), &metrics_of(r)), get(r, c)?)))
+            .collect();
+        per.insert((*c).to_string(), stats(&pairs));
+    }
+    // The combiner alone, on Oura's own contributor values.
+    let combine: Vec<(f64, f64)> = recent
+        .iter()
+        .filter_map(|r| {
+            let w = params["weights"][READINESS].as_object()?;
+            let mut total = 0.0;
+            for (c, wt) in w {
+                total += get(r, c)? * wt.as_f64()? / 100.0;
+            }
+            Some((total.round(), get(r, READINESS)?))
+        })
+        .collect();
+    // The whole chain: drivers → contributors → score.
+    let chain: Vec<(f64, f64)> = recent
+        .iter()
+        .filter_map(|r| Some((score(&params, READINESS, &metrics_of(r), false)["score"].as_f64()?, get(r, READINESS)?)))
+        .collect();
+    Ok(json!({ "contributors": per, "combiner": stats(&combine), "full": stats(&chain), "weights": params["weights"][READINESS] }))
+}
