@@ -73,9 +73,10 @@ fn read_minutes(db: &Path) -> Result<RingMinutes> {
                 continue;
             };
             let t0 = clock.unix_s(*ds, *cu);
+            let n = mets.len();
             for (i, m) in mets.iter().enumerate() {
                 let Some(mv) = m.as_f64() else { continue };
-                let minute = ((t0 + i as f64 * 60.0) / 60.0).floor() as i64;
+                let minute = (activity_minute(t0, i, n) / 60.0).floor() as i64;
                 // Overlapping pages repeat minutes; keep one value per minute.
                 let slot = met.entry(minute).or_insert(mv);
                 if mv > *slot {
@@ -211,6 +212,13 @@ fn intensity_label(met_avg: f64) -> (&'static str, &'static str) {
 
 /// Sustained activity in the last `days` days of data, newest first.
 ///
+/// Start (unix seconds) of minute `i` of an `activity_information` record of `n`
+/// minutes stamped at `stamp`. The ring writes a record when it closes it, so the
+/// stamp is the end of the last minute: minute `i` starts `(n − i)` minutes earlier.
+pub fn activity_minute(stamp: f64, i: usize, n: usize) -> f64 {
+    stamp - (n.saturating_sub(i)) as f64 * 60.0
+}
+
 /// A workout is a run of minutes at or above [`ACTIVE_MET`], bridging pauses of up to
 /// [`MAX_PAUSE_MIN`] minutes, with at least [`MIN_WORKOUT_MIN`] active minutes.
 pub fn detect_workouts(db: &Path, tz: impl Into<crate::OffsetHours>, days: u32) -> Result<Value> {

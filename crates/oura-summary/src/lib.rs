@@ -3138,9 +3138,14 @@ pub fn build_summary(
         }
         if let Ok(v) = serde_json::from_str::<Value>(jstr) {
             if let Some(met) = v["met"].as_array() {
+                // The ring stamps an activity record when it closes it: the stamp is
+                // the end of its last minute, so minute i starts (n − i) minutes
+                // before it. (Read as the start, a just-finished walk showed an end
+                // time minutes in the future.) See `workouts::activity_minute`.
+                let n = met.len();
                 for (i, m) in met.iter().enumerate() {
                     let mv = m.as_f64().unwrap_or(1.0);
-                    let unix = unix_s_at(*ds, *cu) + i as f64 * 60.0;
+                    let unix = workouts::activity_minute(unix_s_at(*ds, *cu), i, n);
                     if !seen_minutes.insert((unix / 60.0).floor() as i64) {
                         continue;
                     }

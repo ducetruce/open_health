@@ -829,14 +829,33 @@ struct WorkoutHRChart: View {
                 CGPoint(x: size.width * CGFloat((t - t0) / (t1 - t0)),
                         y: size.height * (1 - CGFloat((v - lo) / max(1, hi - lo))))
             }
-            var line = Path(); line.move(to: p(pts[0].0, pts[0].1))
-            for q in pts.dropFirst() { line.addLine(to: p(q.0, q.1)) }
-            var area = line
-            area.addLine(to: CGPoint(x: size.width, y: size.height))
-            area.addLine(to: CGPoint(x: 0, y: size.height)); area.closeSubpath()
-            ctx.fill(area, with: .linearGradient(Gradient(colors: [Obs.heartAccent.opacity(0.35), Obs.heartAccent.opacity(0)]),
-                                                 startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
-            ctx.stroke(line, with: .color(Obs.heartAccent), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            // The ring measures heart rate only while the hand is still, so a walk has
+            // readings around its ends and none in between. Break the line over any
+            // gap longer than two minutes instead of drawing a straight line across.
+            var runs: [[(Double, Double)]] = [[pts[0]]]
+            for q in pts.dropFirst() {
+                if let last = runs[runs.count - 1].last, q.0 - last.0 > 120 { runs.append([q]) }
+                else { runs[runs.count - 1].append(q) }
+            }
+            for run in runs {
+                var line = Path(); line.move(to: p(run[0].0, run[0].1))
+                for q in run.dropFirst() { line.addLine(to: p(q.0, q.1)) }
+                if run.count > 1 {
+                    var area = line
+                    area.addLine(to: CGPoint(x: p(run[run.count - 1].0, 0).x, y: size.height))
+                    area.addLine(to: CGPoint(x: p(run[0].0, 0).x, y: size.height)); area.closeSubpath()
+                    ctx.fill(area, with: .linearGradient(Gradient(colors: [Obs.heartAccent.opacity(0.35), Obs.heartAccent.opacity(0)]),
+                                                         startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
+                    ctx.stroke(line, with: .color(Obs.heartAccent), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                } else {
+                    let c = p(run[0].0, run[0].1)
+                    ctx.fill(Path(ellipseIn: CGRect(x: c.x - 2, y: c.y - 2, width: 4, height: 4)), with: .color(Obs.heartAccent))
+                }
+            }
+            if runs.count > 1 {
+                ctx.draw(Text("no readings while moving").font(Obs.mono(10)).foregroundColor(Obs.muted),
+                         at: CGPoint(x: size.width / 2, y: size.height - 8))
+            }
         }
     }
 }
