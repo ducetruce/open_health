@@ -101,21 +101,22 @@ const DRIVERS: &[(&str, &[&str], Kind)] = &[
     // Past week's HRV against the past two months' (`hrv_ratio`).
     ("HRV Balance Score", &["hrv_ratio"], Kind::Mono),
     ("Temperature Score", &["Temperature Deviation (°C)"], Kind::Emp),
-    (
-        "Sleep Balance Score",
-        &["Total Sleep Duration", "trail14_Total Sleep Duration"],
-        Kind::Lin,
-    ),
+    // Mean of the last 7 nights' sleep, tonight included (held-out error 5.7 vs 6.2
+    // for tonight + previous 14, and no longer 3 points low).
+    ("Sleep Balance Score", &["mean7_Total Sleep Duration"], Kind::Mono),
     ("Previous Day Activity Score", &["prev_Average MET"], Kind::Mono),
+    // Yesterday, the past 2 weeks and the past 2 months (held-out 4.6 vs 6.7).
     (
         "Activity Balance Score",
-        &["prev_Average MET", "trail14_Average MET"],
+        &["prev_Average MET", "trail14_Average MET", "trail60_Average MET"],
         Kind::Lin,
     ),
     // Hours from the night's lowest heart rate to waking, and where in the night
     // that low came. The older trends export lacks heart-rate curves: then the
     // contributor falls back to its average (see `fit_contributor`).
-    ("Recovery Index Score", &["rec_h", "low_frac"], Kind::Lin),
+    // Hours from when the heart rate settled (within 3 bpm of the night's low) to
+    // waking; see `readiness::recovery_stable_h` (held-out 6.3 vs 16).
+    ("Recovery Index Score", &["rec3_h"], Kind::Mono),
     // Spread of the sleep midpoint over the past week, and tonight's distance from it.
     ("Sleep Regularity Score", &["mid_sd7", "mid_reg"], Kind::Lin),
 ];
@@ -153,7 +154,14 @@ pub fn active_kcal_rate(params: Option<&Value>, met: f64) -> Option<f64> {
 }
 
 /// Contributors fitted on only the most recent N usable days.
-const RECENT_ONLY: &[(&str, usize)] = &[("Sleep Timin Score", 250)];
+const RECENT_ONLY: &[(&str, usize)] = &[
+    ("Sleep Timin Score", 250),
+    // These drifted over the export (Oura re-tuning or the wearer changing): the
+    // most recent days predict the next ones better than all of them.
+    ("Recovery Index Score", 250),
+    ("Sleep Balance Score", 250),
+    ("Activity Balance Score", 250),
+];
 
 /// Daily values kept as history: export column → key in the summary JSON.
 const HISTORY_COLUMNS: &[(&str, &str)] = &[
@@ -413,6 +421,32 @@ fn engineer(rows: &mut [Row]) {
                 }
             }
             if let Some(v) = v {
+                hist.push(v);
+            }
+        }
+    }
+    // Mean of the last 7 nights' sleep, tonight included.
+    {
+        let mut hist: Vec<f64> = Vec::new();
+        for r in rows.iter_mut() {
+            if let Some(v) = get(r, "Total Sleep Duration") {
+                hist.push(v);
+                let tail = &hist[hist.len().saturating_sub(7)..];
+                if tail.len() >= 5 {
+                    r.insert("mean7_Total Sleep Duration".into(), json!(tail.iter().sum::<f64>() / tail.len() as f64));
+                }
+            }
+        }
+    }
+    // The past 60 days' average MET (before today).
+    {
+        let mut hist: Vec<f64> = Vec::new();
+        for r in rows.iter_mut() {
+            if hist.len() >= 20 {
+                let tail = &hist[hist.len().saturating_sub(60)..];
+                r.insert("trail60_Average MET".into(), json!(tail.iter().sum::<f64>() / tail.len() as f64));
+            }
+            if let Some(v) = get(r, "Average MET") {
                 hist.push(v);
             }
         }
@@ -741,7 +775,7 @@ const V2_READINESS_CONTRIBUTORS: &[(&str, &str)] = &[
 /// Hours from a night's lowest heart rate (median of 5 consecutive 5-minute samples,
 /// as `readiness::recovery_index_h` does on ring data) to the end of the night, and
 /// where in the night that low fell (0 = start, 1 = end).
-fn recovery_from_curve(curve: &Value) -> Option<(f64, f64)> {
+fn recovery_from_curve(curve: &Value) -> Option<(f64, f64, Option<f64>)> {
     let step = curve["interval"].as_f64().unwrap_or(300.0);
     let items = curve["items"].as_array()?;
     let present: Vec<(usize, f64)> =
@@ -759,7 +793,10 @@ fn recovery_from_curve(curve: &Value) -> Option<(f64, f64)> {
         .min_by(|a, b| a.1.total_cmp(&b.1))?;
     let hours = (items.len() - lowest.0) as f64 * step / 3600.0;
     let night_hours = items.len() as f64 * step / 3600.0;
-    Some((hours, 1.0 - hours / night_hours))
+    // When the heart rate settled: the first 5-minute value within 3 bpm of the low.
+    let low = present.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let settled = present.iter().find(|p| p.1 <= low + 3.0).map(|p| (items.len() - 1 - p.0) as f64 * step / 3600.0);
+    Some((hours, 1.0 - hours / night_hours, settled))
 }
 
 /// Merge the newer export's files into one row per day, using the trends export's
@@ -887,9 +924,12 @@ fn merge_v2(tables: &[(V2Kind, Vec<Row>)]) -> Vec<Row> {
         entry.insert("Bedtime Start".into(), json!(s(r, "bedtime_start")));
         entry.insert("Bedtime End".into(), json!(s(r, "bedtime_end")));
         let curve: Value = serde_json::from_str(&s(r, "heart_rate")).unwrap_or(Value::Null);
-        if let Some((hours, frac)) = recovery_from_curve(&curve) {
+        if let Some((hours, frac, settled)) = recovery_from_curve(&curve) {
             entry.insert("rec_h".into(), json!(hours));
             entry.insert("low_frac".into(), json!(frac));
+            if let Some(s) = settled {
+                entry.insert("rec3_h".into(), json!(s));
+            }
         }
     }
     days.into_values().collect()
@@ -1701,7 +1741,8 @@ c;\"{\"\"daytime_recovery\"\": 33.5, \"\"sleep_recovery\"\": 57.8, \"\"stress\"\
         let w = &params["weights"][SLEEP];
         assert!((w["Total Sleep Score"].as_f64().unwrap() - 35.0).abs() < 1.0, "{w}");
         // Recovery index is fitted from the heart-rate curves, not held at its average.
-        assert_eq!(params["contributors"]["Recovery Index Score"]["kind"], "lin");
+        assert_eq!(params["contributors"]["Recovery Index Score"]["kind"], "mono");
+        assert_eq!(params["contributors"]["Recovery Index Score"]["drivers"][0], "rec3_h");
         assert_eq!(params["contributors"]["Sleep Timin Score"]["drivers"][0], "dist_usual");
         clear(&db).unwrap();
     }

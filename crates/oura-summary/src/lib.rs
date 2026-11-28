@@ -3045,6 +3045,16 @@ pub fn build_summary(
             let night_h = ((end_unix - start_unix) / 3600.0).max(0.5);
             let rec_h = readiness::recovery_index_h(&nt.hr_t, nt.end_ds).unwrap_or(night_h * 0.5);
             m.insert("rec_h", rec_h);
+            m.insert("rec3_h", readiness::recovery_stable_h(&nt.hr_t, nt.end_ds).unwrap_or(rec_h));
+            // The last 7 nights' sleep, tonight included (the export's nights first).
+            let week: Vec<f64> = prior_main_asleep
+                .iter()
+                .filter(|&&(end, _)| end <= start_unix)
+                .map(|&(_, v)| v)
+                .collect();
+            let mut week = week[week.len().saturating_sub(6)..].to_vec();
+            week.push(total_sleep);
+            m.insert("mean7_Total Sleep Duration", week.iter().sum::<f64>() / week.len() as f64);
             m.insert("low_frac", (1.0 - rec_h / night_h).clamp(0.0, 1.0));
             let wake_day = (end_unix as i64 + offset_seconds(tz)).div_euclid(86_400);
             let history = prior_main_ends.iter().filter(|&&end| end <= start_unix).count();
@@ -3353,6 +3363,11 @@ pub fn build_summary(
             let history: Vec<f64> = met_by_day.range(wake_day - 14..wake_day).map(|(_, v)| *v).collect();
             m.insert("prev_Average MET", previous);
             m.insert("trail14_Average MET", mean(&history).unwrap_or(previous));
+            let long: Vec<f64> = met_by_day.range(wake_day - 60..wake_day).map(|(_, v)| *v).collect();
+            m.insert(
+                "trail60_Average MET",
+                if long.len() >= 20 { mean(&long) } else { None }.unwrap_or_else(|| mean(&history).unwrap_or(previous)),
+            );
             let scored = oura_export::score(params, oura_export::READINESS, &m, provisional);
             if !scored.is_null() {
                 nights_json[nights_count - 1 - index]["readiness"] = scored;
